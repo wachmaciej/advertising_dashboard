@@ -32,6 +32,28 @@ st.sidebar.header("Advertising Data")
 advertising_file = st.sidebar.file_uploader("Upload Advertising Data (CSV)", type=["csv"], key="adv_file")
 if advertising_file is not None:
     st.session_state["ad_data"] = pd.read_csv(advertising_file)
+    
+    # Add Marketplace selector after file is uploaded
+    if "ad_data" in st.session_state and "Marketplace" in st.session_state["ad_data"].columns:
+        available_marketplaces = sorted(st.session_state["ad_data"]["Marketplace"].unique())
+        default_selection = available_marketplaces[0] if available_marketplaces else None
+        selected_marketplace = st.sidebar.selectbox(
+            "Select Marketplace",
+            options=["All Marketplaces"] + available_marketplaces,
+            index=0,
+            key="marketplace_selector"
+        )
+        
+        # Filter data based on selected marketplace
+        if selected_marketplace != "All Marketplaces":
+            st.session_state["filtered_ad_data"] = st.session_state["ad_data"][
+                st.session_state["ad_data"]["Marketplace"] == selected_marketplace
+            ]
+        else:
+            st.session_state["filtered_ad_data"] = st.session_state["ad_data"]
+    else:
+        # If no Marketplace column exists, use all data
+        st.session_state["filtered_ad_data"] = st.session_state["ad_data"]
 
 # =============================================================================
 # Common Functions for Advertising Data
@@ -147,6 +169,7 @@ def create_performance_metrics_table(df, portfolio_name=None, campaign_type="Spo
     return metrics_by_portfolio, total_summary
 
 def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yoy=True):
+    """Create a chart showing metric over time with optional YoY comparison"""
     filtered_data = data[data["Product"] == product_type].copy()
     if portfolio != "All Portfolios":
         filtered_data = filtered_data[filtered_data["Portfolio Name"] == portfolio]
@@ -164,6 +187,7 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
         hover_template = "%{y:.1f}<extra></extra>"
     else:
         hover_template = "%{y:,.1f}<extra></extra>"
+
     if show_yoy and len(years) > 1:
         colors = {
             years[0]: "#1f77b4",
@@ -235,6 +259,7 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
                 hovertemplate=hover_template
             )
         )
+
     if show_yoy and len(years) > 1:
         monthly_agg = filtered_data.groupby(["Year", "Month", "MonthName"]).agg({
             "Impressions": "sum",
@@ -345,7 +370,6 @@ def style_total_summary(df):
     formatted = formatted.applymap(color_roas, subset=["ROAS"])
     return formatted.set_properties(**{"font-weight": "bold"})
 
-
 def style_metrics_table(df):
     df_copy = df.copy()
     df_copy = df_copy.replace([float("inf"), -float("inf")], float("nan"))
@@ -438,13 +462,13 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
     # -------------------------------
     with tabs_adv[0]:
         st.markdown("### YOY Comparison")
-        ad_data = preprocess_ad_data(st.session_state["ad_data"])
+        ad_data = preprocess_ad_data(st.session_state["filtered_ad_data"])
 
         # ----------------------------------------------------------------
         # Updated General Overview Section with selectors including metrics
         # ----------------------------------------------------------------
         st.markdown("#### General Overview by Product Type")
-        ad_data_overview = st.session_state["ad_data"].copy()
+        ad_data_overview = st.session_state["filtered_ad_data"].copy()
         ad_data_overview["WE Date"] = pd.to_datetime(ad_data_overview["WE Date"], dayfirst=True, errors="coerce")
         ad_data_overview["Year"] = ad_data_overview["WE Date"].dt.year
         ad_data_overview["Week"] = ad_data_overview["WE Date"].dt.isocalendar().week
@@ -525,7 +549,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 lambda row: (row["Spend"] / row["Sales"] * 100) if row["Sales"] else 0,
                 axis=1
             )
-            
+
             # Rename columns with year suffix but only for selected metrics
             rename_cols = {}
             for metric in ["Impressions", "Clicks", "Spend", "Sales", "Orders", "Units", "CTR", "CVR", "CPC", "ACOS"]:
@@ -553,6 +577,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                                 if row[col_prev] != 0 else None,
                                 axis=1
                             ).round(0)
+
             ordered_cols = ["Product"]
             for metric in selected_metrics:  # Only include selected metrics in column order
                 if (len(selected_years) >= 2 and
@@ -868,7 +893,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 for metric in selected_metrics:
                     if metric in portfolio_pivot.columns:
                         summary_row[metric] = portfolio_pivot[metric].sum()
-                
+
                 # Recalculate derived metrics
                 if "CTR" in selected_metrics and "Clicks" in selected_metrics and "Impressions" in selected_metrics:
                     summary_row["CTR"] = (summary_row["Clicks"] / summary_row["Impressions"] * 100) if summary_row.get("Impressions", 0) > 0 else 0
@@ -1032,7 +1057,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                             curr_sales = yoy_match_type[f"Sales {current_year}"].sum() if f"Sales {current_year}" in yoy_match_type.columns else 0
                             summary_row[f"ACOS {previous_year}"] = (prev_spend / prev_sales * 100) if prev_sales > 0 else 0
                             summary_row[f"ACOS {current_year}"] = (curr_spend / curr_sales * 100) if curr_sales > 0 else 0
-                        
+
                         # Calculate percent change for the summary row
                         prev_val = summary_row[f"{metric} {previous_year}"]
                         curr_val = summary_row[f"{metric} {current_year}"]
@@ -1059,7 +1084,6 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                         elif "CPC" in col:
                             format_dict[col] = "${:.2f}"
 
-    
                     styled_main_table = main_match_table.style.format(format_dict)
                     pct_change_cols = [col for col in main_match_table.columns if "% Change" in col]
                     styled_main_table = styled_main_table.applymap(
@@ -1074,6 +1098,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                     styled_summary_table = summary_df.style.format(format_dict)
                     styled_summary_table = styled_summary_table.set_properties(**{"font-weight": "bold"})
                     st.dataframe(styled_summary_table, use_container_width=True)
+
                 else:
                     # Single year display (filter for selected metrics)
                     match_type_pivot = product_data.groupby("Match Type", as_index=False).agg({
@@ -1100,7 +1125,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                     summary_row = {
                         "Match Type": f"TOTAL - {product_type}"
                     }
-                    
+
                     # Calculate totals only for selected metrics
                     for metric in match_type_metrics:
                         if metric in ["Impressions", "Clicks", "Spend", "Sales", "Orders", "Units"]:
@@ -1160,8 +1185,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 has_multiple_years = len(years) >= 2
                 
                 # Filter metrics based on selection for RTW analysis
-                rtw_metrics = [m for m in ["Impressions", "Clicks", "Spend", "Sales", "Orders", "Units", "CTR", "CVR", "CPC", "ACOS"] if m in selected_metrics]
-
+                rtw_metrics = [m for m in ["Impressions", "Clicks", "Spend", "Sales", "Orders", "Units", "CTR", "CVR", "CPC", "ACOS"] if m in selected_metrics]   
             if has_multiple_years:
                 current_year = max(years)
                 previous_year = current_year - 1
@@ -1278,7 +1302,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                     else:
                         pct_change = float("inf") if curr_val > 0 else 0
                     summary_row[f"{metric} % Change"] = pct_change
-                    
+                
                 # Separate main table and summary row for RTW
                 main_rtw_table = yoy_rtw.copy()
                 summary_df = pd.DataFrame([summary_row])
@@ -1309,7 +1333,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 styled_summary_table = summary_df.style.format(format_dict)
                 styled_summary_table = styled_summary_table.set_properties(**{"font-weight": "bold"})
                 st.dataframe(styled_summary_table, use_container_width=True)
-
+            
             else:
                 # Single year RTW analysis with selected metrics
                 rtw_pivot = rtw_filtered_data.groupby("RTW/Prospecting", as_index=False).agg({
@@ -1332,7 +1356,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 # Sort by Spend if available
                 if "Spend" in rtw_metrics:
                     rtw_pivot = rtw_pivot.sort_values("Spend", ascending=False)
-                    
+
                 # Create summary row for selected metrics
                 summary_row = {
                     "RTW/Prospecting": f"TOTAL - {selected_rtw_product}"
@@ -1375,13 +1399,13 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 st.markdown("###### Total")
                 st.dataframe(style_rtw_table(summary_df), use_container_width=True)
             st.markdown("")
-        
+
         # -------------------------------
         # Tab 1: Sponsored Products
         # -------------------------------
         with tabs_adv[1]:
             st.markdown("### Sponsored Products Performance")
-            ad_data = preprocess_ad_data(st.session_state["ad_data"])
+            ad_data = preprocess_ad_data(st.session_state["filtered_ad_data"])
             if "Product" in ad_data.columns and "Sponsored Products" in ad_data["Product"].unique():
                 with st.expander("Filters", expanded=True):
                     col1, col2 = st.columns(2)
@@ -1455,12 +1479,13 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                     st.markdown(insight)
             else:
                 st.warning("No Sponsored Products data found in the uploaded file. Please check your data.")
+
         # -------------------------------
         # Tab 2: Sponsored Brands
         # -------------------------------
         with tabs_adv[2]:
             st.markdown("### Sponsored Brands Performance")
-            ad_data = preprocess_ad_data(st.session_state["ad_data"])
+            ad_data = preprocess_ad_data(st.session_state["filtered_ad_data"])
             if "Product" in ad_data.columns and "Sponsored Brands" in ad_data["Product"].unique():
                 with st.expander("Filters", expanded=True):
                     col1, col2 = st.columns(2)
@@ -1527,6 +1552,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 st.dataframe(style_total_summary(total_summary), use_container_width=True)
                 st.subheader("Performance Metrics by Portfolio")
                 st.dataframe(style_metrics_table(metrics_table), use_container_width=True)
+
                 st.subheader("Key Insights")
                 total_metrics = total_summary.iloc[0]
                 insights = []
@@ -1554,12 +1580,13 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                     st.markdown(insight)
             else:
                 st.warning("No Sponsored Brands data found in the uploaded file. Please check your data.")
+
         # -------------------------------
         # Tab 3: Sponsored Display
         # -------------------------------
         with tabs_adv[3]:
             st.markdown("### Sponsored Display Performance")
-            ad_data = preprocess_ad_data(st.session_state["ad_data"])
+            ad_data = preprocess_ad_data(st.session_state["filtered_ad_data"])
             if "Product" in ad_data.columns and "Sponsored Display" in ad_data["Product"].unique():
                 with st.expander("Filters", expanded=True):
                     col1, col2 = st.columns(2)
@@ -1626,6 +1653,7 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                 st.dataframe(style_total_summary(total_summary), use_container_width=True)
                 st.subheader("Performance Metrics by Portfolio")
                 st.dataframe(style_metrics_table(metrics_table), use_container_width=True)
+
                 st.subheader("Key Insights")
                 total_metrics = total_summary.iloc[0]
                 insights = generate_insights(total_metrics, "Sponsored Display")
@@ -1633,3 +1661,9 @@ if "ad_data" in st.session_state and st.session_state["ad_data"] is not None:
                     st.markdown(insight)
             else:
                 st.warning("No Sponsored Display data found in the uploaded file. Please check your data.")
+
+                
+
+                        
+
+                
