@@ -4,11 +4,11 @@ import numpy as np  # Added numpy import
 import warnings
 import plotly.express as px
 import datetime
-import calendar
+# import calendar # Removed as not explicitly used
 from plotly.subplots import make_subplots
 import plotly.graph_objects as go
 import re
-import io
+import io # Removed as not explicitly used
 from functools import reduce
 
 
@@ -28,7 +28,7 @@ st.set_page_config(
 def preprocess_ad_data(df):
     """Preprocess advertising data for analysis"""
     if df is None or df.empty:
-         return pd.DataFrame()
+          return pd.DataFrame()
     df_processed = df.copy() # Work on a copy
     # Attempt to convert 'WE Date', handle errors gracefully
     try:
@@ -187,78 +187,10 @@ def filter_data_by_timeframe(df, selected_years, selected_timeframe, selected_we
 
 
 # =============================================================================
-# --- Title and Logo ---
-# =============================================================================
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title("Advertising Dashboard 📊")
-with col2:
-    # Wrap image loading in a try-except block
-    try:
-        st.image("logo.png", width=300)
-    except Exception as e:
-        st.warning(f"Could not load logo.png: {e}")
-
-
-# =============================================================================
-# --- Sidebar File Uploader for Advertising Data ---
-# =============================================================================
-st.sidebar.header("Advertising Data")
-advertising_file = st.sidebar.file_uploader("Upload Advertising Data (CSV)", type=["csv"], key="adv_file")
-if advertising_file is not None:
-    # --- Data Loading and Initial Filtering ---
-    try:
-        st.session_state["ad_data"] = pd.read_csv(advertising_file)
-
-        # --- Marketplace Selector ---
-        if "Marketplace" in st.session_state["ad_data"].columns:
-            available_marketplaces = sorted(st.session_state["ad_data"]["Marketplace"].unique())
-            # Ensure options are strings for selectbox, handle potential NaN
-            available_marketplaces = [str(mp) for mp in available_marketplaces if pd.notna(mp)]
-
-            if available_marketplaces: # Only show selector if marketplaces exist
-                selected_marketplace = st.sidebar.selectbox(
-                    "Select Marketplace",
-                    options=["All Marketplaces"] + available_marketplaces,
-                    index=0, # Default to "All Marketplaces"
-                    key="marketplace_selector"
-                )
-                # Filter data based on selected marketplace
-                if selected_marketplace != "All Marketplaces":
-                    st.session_state["filtered_ad_data"] = st.session_state["ad_data"][
-                        st.session_state["ad_data"]["Marketplace"].astype(str) == selected_marketplace
-                    ].copy() # Use .copy() to avoid SettingWithCopyWarning
-                else:
-                    st.session_state["filtered_ad_data"] = st.session_state["ad_data"].copy()
-            else:
-                st.sidebar.warning("No valid marketplaces found in 'Marketplace' column.")
-                st.session_state["filtered_ad_data"] = st.session_state["ad_data"].copy() # Use all data if no valid marketplaces
-        else:
-            # If no Marketplace column exists, use all data
-            st.session_state["filtered_ad_data"] = st.session_state["ad_data"].copy()
-
-        # --- PREPROCESSING STEP (Now defined above) ---
-        # Perform preprocessing ONCE and store it
-        if "filtered_ad_data" in st.session_state and not st.session_state["filtered_ad_data"].empty:
-            # Call the function which is now defined above this point
-            st.session_state["ad_data_processed"] = preprocess_ad_data(st.session_state["filtered_ad_data"])
-        else:
-            # Handle case where filtered data might be empty even if file loaded
-            if "ad_data_processed" in st.session_state: del st.session_state["ad_data_processed"]
-        # --- End Preprocessing Step ---
-
-    except Exception as e:
-        st.error(f"Error reading or processing CSV file: {e}")
-        # Reset session state if error occurs
-        if "ad_data" in st.session_state: del st.session_state["ad_data"]
-        if "filtered_ad_data" in st.session_state: del st.session_state["filtered_ad_data"]
-        if "ad_data_processed" in st.session_state: del st.session_state["ad_data_processed"] # Also clear processed data
-
-# =============================================================================
-# REST of Helper Functions
+# REST of Helper Functions Start Here
 # =============================================================================
 
-# Helper functions remain largely the same, ensure they handle potential missing columns gracefully
+# --- Basic Chart/Table/Insight/Styling Helpers ---
 
 def create_metric_comparison_chart(df, metric, portfolio_name=None, campaign_type="Sponsored Products"):
     # Add checks for required columns
@@ -386,43 +318,43 @@ def create_performance_metrics_table(df, portfolio_name=None, campaign_type="Spo
      # Check required columns
      required_cols = {"Product", "Portfolio Name", "Impressions", "Clicks", "Spend", "Sales", "Orders"}
      if df is None or df.empty:
-         st.warning(f"Performance table received empty data for {campaign_type}.")
-         return pd.DataFrame(), pd.DataFrame()
+        st.warning(f"Performance table received empty data for {campaign_type}.")
+        return pd.DataFrame(), pd.DataFrame()
 
      if not required_cols.issubset(df.columns):
-         missing = required_cols - set(df.columns)
-         st.warning(f"Performance table missing required columns: {missing}")
-         return pd.DataFrame(), pd.DataFrame()
+        missing = required_cols - set(df.columns)
+        st.warning(f"Performance table missing required columns: {missing}")
+        return pd.DataFrame(), pd.DataFrame()
 
      filtered_df = df[df["Product"] == campaign_type].copy()
      # Handle potential NaN in Portfolio Name before filtering/grouping
      filtered_df["Portfolio Name"] = filtered_df["Portfolio Name"].fillna("Unknown Portfolio")
 
      if portfolio_name and portfolio_name != "All Portfolios":
-         # Check if portfolio exists
-         if portfolio_name in filtered_df["Portfolio Name"].unique():
-              filtered_df = filtered_df[filtered_df["Portfolio Name"] == portfolio_name]
-         else:
-              st.warning(f"Portfolio '{portfolio_name}' not found for {campaign_type} in performance table.")
-              return pd.DataFrame(), pd.DataFrame()
+        # Check if portfolio exists
+        if portfolio_name in filtered_df["Portfolio Name"].unique():
+             filtered_df = filtered_df[filtered_df["Portfolio Name"] == portfolio_name]
+        else:
+             st.warning(f"Portfolio '{portfolio_name}' not found for {campaign_type} in performance table.")
+             return pd.DataFrame(), pd.DataFrame()
 
 
      if filtered_df.empty:
-         # st.warning(f"No data for {campaign_type}" + (f" and portfolio '{portfolio_name}'" if portfolio_name and portfolio_name != "All Portfolios" else "") + " for performance table.") # Can be verbose
-         return pd.DataFrame(), pd.DataFrame()
+        # st.warning(f"No data for {campaign_type}" + (f" and portfolio '{portfolio_name}'" if portfolio_name and portfolio_name != "All Portfolios" else "") + " for performance table.") # Can be verbose
+        return pd.DataFrame(), pd.DataFrame()
 
      # Aggregate base metrics
      try:
-          metrics_by_portfolio = filtered_df.groupby("Portfolio Name").agg(
-              Impressions=("Impressions", "sum"),
-              Clicks=("Clicks", "sum"),
-              Spend=("Spend", "sum"),
-              Sales=("Sales", "sum"),
-              Orders=("Orders", "sum")
-          ).reset_index()
+        metrics_by_portfolio = filtered_df.groupby("Portfolio Name").agg(
+             Impressions=("Impressions", "sum"),
+             Clicks=("Clicks", "sum"),
+             Spend=("Spend", "sum"),
+             Sales=("Sales", "sum"),
+             Orders=("Orders", "sum")
+        ).reset_index()
      except Exception as e:
-          st.warning(f"Error aggregating performance table: {e}")
-          return pd.DataFrame(), pd.DataFrame()
+        st.warning(f"Error aggregating performance table: {e}")
+        return pd.DataFrame(), pd.DataFrame()
 
 
      # Calculate derived metrics safely
@@ -444,36 +376,36 @@ def create_performance_metrics_table(df, portfolio_name=None, campaign_type="Spo
      # Calculate Total Summary Row
      # Check if metrics_by_portfolio is empty before summing
      if metrics_by_portfolio.empty:
-          total_summary = pd.DataFrame() # Return empty if no portfolio data
+        total_summary = pd.DataFrame() # Return empty if no portfolio data
      else:
-          total_impressions = metrics_by_portfolio["Impressions"].sum()
-          total_clicks = metrics_by_portfolio["Clicks"].sum()
-          total_spend = metrics_by_portfolio["Spend"].sum() # Use already rounded sum
-          total_sales = metrics_by_portfolio["Sales"].sum() # Use already rounded sum
-          total_orders = metrics_by_portfolio["Orders"].sum()
+        total_impressions = metrics_by_portfolio["Impressions"].sum()
+        total_clicks = metrics_by_portfolio["Clicks"].sum()
+        total_spend = metrics_by_portfolio["Spend"].sum() # Use already rounded sum
+        total_sales = metrics_by_portfolio["Sales"].sum() # Use already rounded sum
+        total_orders = metrics_by_portfolio["Orders"].sum()
 
-          total_ctr = (total_clicks / total_impressions * 100) if total_impressions else 0
-          total_cvr = (total_orders / total_clicks * 100) if total_clicks else 0
-          total_acos = (total_spend / total_sales * 100) if total_sales else np.nan
-          total_roas = (total_sales / total_spend) if total_spend else np.nan
+        total_ctr = (total_clicks / total_impressions * 100) if total_impressions else 0
+        total_cvr = (total_orders / total_clicks * 100) if total_clicks else 0
+        total_acos = (total_spend / total_sales * 100) if total_sales else np.nan
+        total_roas = (total_sales / total_spend) if total_spend else np.nan
 
-          # Ensure total ACOS/ROAS are not infinite
-          total_acos = np.nan if total_acos in [np.inf, -np.inf] else total_acos
-          total_roas = np.nan if total_roas in [np.inf, -np.inf] else total_roas
+        # Ensure total ACOS/ROAS are not infinite
+        total_acos = np.nan if total_acos in [np.inf, -np.inf] else total_acos
+        total_roas = np.nan if total_roas in [np.inf, -np.inf] else total_roas
 
-          total_summary_data = {
-              "Metric": ["Total"], # Keep simple label for the total row identifier
-              "Impressions": [total_impressions],
-              "Clicks": [total_clicks],
-              "Spend": [total_spend], # Already rounded
-              "Sales": [total_sales], # Already rounded
-              "Orders": [total_orders],
-              "CTR": [round(total_ctr, 1)],
-              "CVR": [round(total_cvr, 1)],
-              "ACOS": [total_acos], # Keep as NaN if applicable, format later
-              "ROAS": [total_roas]  # Keep as NaN if applicable, format later
-          }
-          total_summary = pd.DataFrame(total_summary_data)
+        total_summary_data = {
+             "Metric": ["Total"], # Keep simple label for the total row identifier
+             "Impressions": [total_impressions],
+             "Clicks": [total_clicks],
+             "Spend": [total_spend], # Already rounded
+             "Sales": [total_sales], # Already rounded
+             "Orders": [total_orders],
+             "CTR": [round(total_ctr, 1)],
+             "CVR": [round(total_cvr, 1)],
+             "ACOS": [total_acos], # Keep as NaN if applicable, format later
+             "ROAS": [total_roas]  # Keep as NaN if applicable, format later
+        }
+        total_summary = pd.DataFrame(total_summary_data)
 
      # Rename column for clarity in the main table display
      metrics_by_portfolio = metrics_by_portfolio.rename(columns={"Portfolio Name": "Portfolio"})
@@ -664,9 +596,9 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
             # Only add annotation if the week is within the plotted data range
             if week_val >= min_week_data - 1 and week_val <= max_week_data + 1:
                  fig.add_annotation(
-                     x=week_val,     # Position based on week number
+                     x=week_val,      # Position based on week number
                      y=-0.12,         # Position below the plot area (adjust as needed)
-                     xref="x",       # X position refers to data (week number)
+                     xref="x",        # X position refers to data (week number)
                      yref="paper",    # Y position refers to paper (0=bottom, 1=top)
                      text=month_names[month_num-1],
                      showarrow=False,
@@ -680,7 +612,7 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
              legend_title="Year",
              margin=dict(b=70) # Ensure enough bottom margin for annotations
         )
-         ## --- END MODIFIED SECTION --- ##
+        ## --- END MODIFIED SECTION --- ##
 
     else: # --- Plotting Logic for Single Trace (No YoY or only one year) ---
         # This part still plots against WE Date
@@ -782,7 +714,6 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
 
     return fig
 
-
 def style_dataframe(df, format_dict, highlight_cols=None, color_map_func=None, text_align='right', na_rep='NaN'):
     """Generic styling function for dataframes with alignment and NaN handling."""
     if df is None or df.empty:
@@ -816,19 +747,19 @@ def style_dataframe(df, format_dict, highlight_cols=None, color_map_func=None, t
     # Apply text alignment to all columns except potentially the first one if it's labels
     cols_to_align = df_copy.columns
     if len(cols_to_align) > 0 and df_copy[cols_to_align[0]].dtype == 'object':
-         # Optionally align first column left, others right
-         # Apply styles using a dictionary for clarity
-         try:
-             styles = [
+        # Optionally align first column left, others right
+        # Apply styles using a dictionary for clarity
+        try:
+            styles = [
                  {'selector': 'th', 'props': [('text-align', text_align)]}, # Align headers
                  {'selector': 'td', 'props': [('text-align', text_align)]}, # Align all cells
                  {'selector': 'th:first-child', 'props': [('text-align', 'left')]}, # Align first header left
                  {'selector': 'td:first-child', 'props': [('text-align', 'left')]}  # Align first column cells left
                  ]
-             styled = styled.set_table_styles(styles, overwrite=False)
-         except Exception as e:
-              st.warning(f"Failed to apply specific alignment: {e}")
-              styled = styled.set_properties(**{'text-align': text_align})
+            styled = styled.set_table_styles(styles, overwrite=False)
+        except Exception as e:
+            st.warning(f"Failed to apply specific alignment: {e}")
+            styled = styled.set_properties(**{'text-align': text_align})
 
 
     else: # Align all right if first column isn't object type
@@ -896,8 +827,8 @@ def style_metrics_table(df):
         else: return "color: red"
 
     def color_roas(val):
-         if isinstance(val, str) or pd.isna(val): return "color: grey"
-         return "color: green" if val > 3 else "color: red"
+        if isinstance(val, str) or pd.isna(val): return "color: grey"
+        return "color: green" if val > 3 else "color: red"
 
     styled = style_dataframe(df, format_dict,
                              highlight_cols=["ACOS", "ROAS"],
@@ -930,52 +861,53 @@ def generate_insights(total_metrics_series, campaign_type):
         # Skip ACOS/ROAS/CVR insights as they are meaningless without sales/orders
 
     else: # Proceed with normal insights if there are sales or no spend
-         # ACOS Insight
-         if pd.isna(acos):
+        # ACOS Insight
+        if pd.isna(acos):
              if spend == 0 and sales == 0: insights.append("ℹ️ No spend or sales recorded for ACOS calculation.")
              elif sales == 0 and spend > 0: insights.append("ℹ️ ACOS is not applicable (No Sales from Spend).")
              elif spend == 0: insights.append("ℹ️ ACOS is not applicable (No Spend).")
-         elif acos > acos_threshold:
+        elif acos > acos_threshold:
              insights.append(f"📈 **High ACOS:** Overall ACOS ({acos:.1f}%) is above the target ({acos_threshold}%). Consider optimizing bids, keywords, or targeting to improve efficiency.")
-         else:
+        else:
              insights.append(f"✅ **ACOS:** Overall ACOS ({acos:.1f}%) is within the acceptable range (≤{acos_threshold}%).")
 
-         # ROAS Insight
-         if pd.isna(roas):
+        # ROAS Insight
+        if pd.isna(roas):
              if spend == 0 and sales == 0: insights.append("ℹ️ No spend or sales recorded for ROAS calculation.")
              elif spend == 0 and sales > 0 : insights.append("✅ **ROAS:** ROAS is effectively infinite (Sales with No Spend).")
              elif spend > 0 and sales == 0: insights.append("ℹ️ ROAS is not applicable (No Sales from Spend).")
-         elif roas < 3:
+        elif roas < 3:
              insights.append(f"📉 **Low ROAS:** Overall ROAS ({roas:.2f}) is below the common target of 3. Review keyword performance, bid strategy, and product conversion rates.")
-         else:
+        else:
              insights.append(f"✅ **ROAS:** Overall ROAS ({roas:.2f}) is good (≥3), indicating efficient ad spend relative to sales generated.")
 
-         # CTR Insight
-         if pd.isna(ctr):
+        # CTR Insight
+        if pd.isna(ctr):
              insights.append("ℹ️ Click-Through Rate (CTR) could not be calculated (likely no impressions).")
-         elif ctr < 0.3:
+        elif ctr < 0.3:
              insights.append("📉 **Low CTR:** Click-through rate ({ctr:.2f}%) is low (<0.3%). Consider improving ad creative (images, headlines), relevance, or placement.")
-         else:
+        else:
              insights.append(f"✅ **CTR:** Click-through rate ({ctr:.2f}%) is satisfactory (≥0.3%).")
 
-         # CVR Insight
-         if pd.isna(cvr):
-              insights.append("ℹ️ Conversion Rate (CVR) could not be calculated (likely no clicks).")
-         elif cvr < 10:
+        # CVR Insight
+        if pd.isna(cvr):
+             insights.append("ℹ️ Conversion Rate (CVR) could not be calculated (likely no clicks).")
+        elif cvr < 10:
              insights.append("📉 **Low CVR:** Conversion rate ({cvr:.1f}%) is below 10%. Review product listing pages for clarity, pricing, reviews, and ensure targeting attracts relevant shoppers.")
-         else:
+        else:
              insights.append(f"✅ **CVR:** Conversion rate ({cvr:.1f}%) is good (≥10%).")
 
     return insights
 
 # =============================================================================
-# FINAL REVISED Helper Function for YOY Grouped Tables (Correct Denominator)
+# <<< MODIFIED >>> Helper Function for YOY Grouped Tables (Correct Denominator & % Change Logic)
 # =============================================================================
 def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics, years_to_process, display_col_name=None):
     """
     Creates a merged YoY comparison table grouped by a specific column.
     Calculates 'Ad % Sale' using the SUM of unique weekly Total Sales
     for the period as the denominator for all groups.
+    Calculates absolute percentage point change for % metrics, relative otherwise.
 
     Args:
         df_filtered_period (pd.DataFrame): Data already filtered by year/timeframe.
@@ -994,9 +926,9 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
     date_col = "WE Date" if "WE Date" in df_filtered_period.columns else None
     # Critical check for Ad % Sale calculation
     ad_sale_possible = ("Ad % Sale" in selected_metrics and
-                      "Sales" in df_filtered_period.columns and
-                      "Total Sales" in df_filtered_period.columns and
-                      date_col)
+                       "Sales" in df_filtered_period.columns and
+                       "Total Sales" in df_filtered_period.columns and
+                       date_col)
     if "Ad % Sale" in selected_metrics and not ad_sale_possible:
        st.warning("Cannot calculate 'Ad % Sale'. Requires 'Sales', 'Total Sales', and 'WE Date' columns.")
        selected_metrics = [m for m in selected_metrics if m != "Ad % Sale"] # Remove it if not possible
@@ -1052,7 +984,6 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
                 if not df_year_valid_dates_total.empty:
                     # --- MODIFIED SECTION ---
                     # Check if 'Marketplace' column exists and use it for uniqueness
-                    # This ensures we sum the unique total sales value from EACH marketplace for that date
                     unique_subset = [date_col]
                     if "Marketplace" in df_year_valid_dates_total.columns:
                          unique_subset.append("Marketplace")
@@ -1061,9 +992,6 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
                     # --- END MODIFIED SECTION ---
 
                     total_sales_for_period = pd.to_numeric(unique_weekly_totals_for_sum['Total Sales'], errors='coerce').fillna(0).sum()
-                    # --- Optional Debug Print ---
-                    # print(f"\nDEBUG Year {yr}: Calculated Total Sales for Period = {total_sales_for_period:.2f} using unique subset: {unique_subset}\n")
-                    # ---------------------------
             except Exception as e:
                 st.warning(f"Could not calculate total sales for period for year {yr}: {e}")
                 total_sales_for_period = 0 # Default to 0 on error
@@ -1104,21 +1032,6 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
             if m in df_pivot.columns: df_pivot[m] = df_pivot[m].replace([np.inf, -np.inf], np.nan)
 
 
-        # --- Optional: Detailed Debug Print AFTER Final Calculation ---
-        # if group_by_col == "Product" and not df_pivot.empty:
-        #     print(f"\n--- Debug: FINAL Pivot Data (Year: {yr}, Group: Product, Period Total Sales Denom: {total_sales_for_period:.2f}) ---")
-        #     cols_to_print = [group_by_col]
-        #     if "Sales" in df_pivot.columns: cols_to_print.append("Sales") # Sum Ad Sales
-        #     if "Ad % Sale" in df_pivot.columns: cols_to_print.append("Ad % Sale") # Final %
-        #     cols_to_print = [col for col in cols_to_print if col in df_pivot.columns]
-        #     if cols_to_print:
-        #         print(f"Columns being printed: {cols_to_print}")
-        #         print(df_pivot[cols_to_print].to_string(index=False, float_format='%.2f'))
-        #     else: print("WARN: No relevant columns found in final pivot table for debug.")
-        #     print("--------------------------------------------------------------------------\n")
-        # --- End Optional Debug ---
-
-
         # --- Select and Rename Columns for Output ---
         rename_cols = {m: f"{m} {yr}" for m in calculable_selected_metrics if m in df_pivot.columns}
         cols_to_keep = [group_by_col] + list(rename_cols.keys())
@@ -1148,19 +1061,41 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
         actual_years_in_data = sorted(list(set([int(re.search(r'(\d{4})$', col).group(1)) for col in merged_table.columns if re.search(r'(\d{4})$', col)])))
         if len(actual_years_in_data) >= 2:
             current_year_sel, prev_year_sel = actual_years_in_data[-1], actual_years_in_data[-2]
+            # Define the set of metrics that are already percentages << NEW
+            percentage_metrics = {"CTR", "CVR", "ACOS", "Ad % Sale"}
+
             for metric in selected_metrics: # Use originally selected metrics for iteration
                 col_current, col_prev = f"{metric} {current_year_sel}", f"{metric} {prev_year_sel}"
                 change_col_name = f"{metric} % Change"
+
+                # Determine column order first
                 if col_prev in merged_table.columns: ordered_cols.append(col_prev)
                 if col_current in merged_table.columns: ordered_cols.append(col_current)
+
+                # Calculate change only if both columns exist
                 if col_current in merged_table.columns and col_prev in merged_table.columns:
-                     # Calculate % Change, handle division by zero -> NaN, handle growth from zero -> NaN (was inf before)
-                     merged_table[change_col_name] = merged_table.apply(lambda r: ((r[col_current] - r[col_prev]) / abs(r[col_prev]) * 100) if pd.notna(r[col_prev]) and r[col_prev] != 0 else np.nan, axis=1)
-                     # merged_table[change_col_name] = merged_table[change_col_name].replace([np.inf, -np.inf], np.nan) # Redundant if inf is not generated
-                     ordered_cols.append(change_col_name); change_cols.append(change_col_name)
-        elif actual_years_in_data:
+                    # <<< MODIFIED: Calculate % Change or Absolute Point Change >>>
+                    if metric in percentage_metrics:
+                        # --- Calculate Absolute Percentage Point Difference ---
+                        merged_table[change_col_name] = merged_table.apply(
+                            lambda r: (r[col_current] - r[col_prev]) if pd.notna(r[col_current]) and pd.notna(r[col_prev]) else np.nan,
+                            axis=1
+                        )
+                    else:
+                        # --- Calculate Relative Percentage Change (Original Logic) ---
+                        merged_table[change_col_name] = merged_table.apply(
+                            lambda r: ((r[col_current] - r[col_prev]) / abs(r[col_prev]) * 100) if pd.notna(r[col_prev]) and r[col_prev] != 0 else np.nan,
+                            axis=1
+                        )
+
+                    # Ensure inf/-inf generated by relative change are NaN
+                    merged_table[change_col_name] = merged_table[change_col_name].replace([np.inf, -np.inf], np.nan)
+
+                    ordered_cols.append(change_col_name); change_cols.append(change_col_name)
+
+        elif actual_years_in_data: # Only one actual year in data after merge
              yr_single = actual_years_in_data[0]; ordered_cols.extend([f"{m} {yr_single}" for m in selected_metrics if f"{m} {yr_single}" in merged_table.columns])
-    elif len(years_to_process) == 1:
+    elif len(years_to_process) == 1: # Only one year selected initially
         yr_single = years_to_process[0]; ordered_cols.extend([f"{m} {yr_single}" for m in selected_metrics if f"{m} {yr_single}" in merged_table.columns])
 
     # Final column selection and ordering
@@ -1182,10 +1117,10 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
 
 
 # =============================================================================
-# Adapted Styling Function for YOY Grouped Tables (Updated for Ad % Sale)
+# <<< MODIFIED >>> Styling Function for YOY Grouped Tables (Using applymap for Color)
 # =============================================================================
 def style_yoy_comparison_table(df):
-    """Styles the YoY comparison table with formats and % change coloring."""
+    """Styles the YoY comparison table with formats and % change coloring using applymap."""
     if df is None or df.empty:
         return None
 
@@ -1195,6 +1130,8 @@ def style_yoy_comparison_table(df):
 
     format_dict = {}
     highlight_change_cols = []
+    # Define the set of metrics that use percentage point difference
+    percentage_metrics_for_styling = {"CTR", "CVR", "ACOS", "Ad % Sale"}
 
     for col in df_copy.columns:
         # Use regex that allows spaces for multi-word metrics like "Ad % Sale"
@@ -1205,31 +1142,41 @@ def style_yoy_comparison_table(df):
         is_metric_col = not is_change_col and any(char.isdigit() for char in col) # Basic check if year suffix exists
 
         if is_change_col:
-            # Format based on numeric check *after* inf replacement
-            format_dict[col] = lambda x: f"{x:+.1f}%" if pd.notna(x) else 'N/A' # Show sign for finite numbers
+            # Get the base metric name from the change column more robustly
+            base_metric_for_change = col.replace(" % Change", "").strip()
+            # You can probably remove the debug prints now if the logic was confirmed correct
+            # print(f"DEBUG: Column='{col}', BaseMetric='{base_metric_for_change}'")
+
+            if base_metric_for_change in percentage_metrics_for_styling:
+                # print(f"DEBUG: Applying 'pp' format to {col}")
+                # Format absolute difference with "pp"
+                format_dict[col] = lambda x: f"{x:+.1f} %" if pd.notna(x) else 'N/A' # Using 'pp'
+            else:
+                # print(f"DEBUG: Applying '%' format to {col}")
+                # Format relative difference with "%"
+                format_dict[col] = lambda x: f"{x:+.1f}%" if pd.notna(x) else 'N/A'
+
             highlight_change_cols.append(col)
+
         elif is_metric_col: # Apply formatting only to metric columns (with year suffix)
             if base_metric in ["Impressions", "Clicks", "Orders", "Units"]:
                 format_dict[col] = "{:,.0f}"
             elif base_metric in ["Spend", "Sales"]:
                 format_dict[col] = "${:,.2f}"
-            elif base_metric == "CPC": # Added CPC formatting
+            elif base_metric == "CPC":
                 format_dict[col] = "${:,.2f}"
-            elif base_metric in ["ACOS", "CTR", "CVR", "Ad % Sale"]: # Added Ad % Sale here
-                 # Check if column actually contains numbers before applying %
+            elif base_metric in ["ACOS", "CTR", "CVR", "Ad % Sale"]:
                  if pd.api.types.is_numeric_dtype(df_copy[col].dropna()):
-                     format_dict[col] = '{:.1f}%'
-                 else: # Keep as string if not numeric (e.g. contains 'N/A' already)
+                      format_dict[col] = '{:.1f}%'
+                 else:
                       format_dict[col] = '{}'
             elif base_metric == "ROAS":
-                if pd.api.types.is_numeric_dtype(df_copy[col].dropna()):
-                    format_dict[col] = '{:.2f}'
-                else:
-                    format_dict[col] = '{}'
-            # Add other specific formats if needed
-        elif df_copy[col].dtype == 'object': # Don't format object columns (like the category column)
-             format_dict[col] = "{}"
-
+                 if pd.api.types.is_numeric_dtype(df_copy[col].dropna()):
+                      format_dict[col] = '{:.2f}'
+                 else:
+                      format_dict[col] = '{}'
+        elif df_copy[col].dtype == 'object':
+            format_dict[col] = "{}"
 
     # Apply base styling and formatting
     try:
@@ -1239,29 +1186,35 @@ def style_yoy_comparison_table(df):
         st.dataframe(df_copy) # Display raw data on format error
         return None
 
+    # --- Define the coloring function ---
+    def color_pos_neg(val):
+        """Applies green to positive, red to negative, grey to NaN/non-numeric."""
+        # Attempt to convert to numeric, handling potential errors from formatted strings etc.
+        numeric_val = pd.to_numeric(val, errors='coerce')
 
-    # Apply % Change coloring
-    def color_percentage_change(val):
-        color = 'grey' # Default for NaN or non-finite
-        if pd.notna(val): # Check only for NaN, inf was already replaced
-            if val > 5: color = 'green' # Example: highlight > 5% increase green
-            elif val < -5: color = 'red' # Example: highlight > 5% decrease red
-            else: color = 'inherit' # Use default color if change is small
-        return f'color: {color}'
+        if pd.isna(numeric_val):
+            return 'color: grey' # Color for NaN or non-numeric strings like 'N/A'
+        elif numeric_val > 0:
+            return 'color: green'
+        elif numeric_val < 0:
+            return 'color: red'
+        else: # Value is zero
+            return 'color: inherit' # Use default text color for zero
 
+    # --- Apply coloring using applymap ---
+    # Loop through the identified "% Change" columns
     for change_col in highlight_change_cols:
         if change_col in df_copy.columns:
             try:
-                # Convert column to numeric for applying color logic, coercing errors
-                # Apply the lambda function column-wise (axis=0) to the specific column in subset
-                styled_table = styled_table.apply(
-                    lambda s: [color_percentage_change(v) for v in pd.to_numeric(s, errors='coerce')],
-                    subset=[change_col], # Use the correct loop variable here
-                    axis=0
+                # Apply the color_pos_neg function element-wise to the specific column
+                styled_table = styled_table.applymap(
+                    color_pos_neg,
+                    subset=[change_col]
                 )
             except Exception as e:
-                st.warning(f"Could not apply color styling to column '{change_col}': {e}")
-
+                # Add more specific error handling if needed
+                st.warning(f"Could not apply color styling via applymap to column '{change_col}': {e}")
+    # --- End applying coloring ---
 
     # Apply text alignment (first column left, others right) - reusing existing logic
     cols_to_align = df_copy.columns
@@ -1280,20 +1233,19 @@ def style_yoy_comparison_table(df):
             st.warning(f"Could not apply alignment styles: {e}")
             # Fallback alignment
             styled_table = styled_table.set_properties(**{'text-align': text_align})
-
     else:
         styled_table = styled_table.set_properties(**{'text-align': text_align})
-
 
     return styled_table
 
 # =============================================================================
-# Helper Function for YoY Aggregated Summary Rows
+# <<< MODIFIED >>> Helper Function for YoY Aggregated Summary Rows (% Change Logic)
 # =============================================================================
 def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_name, id_col_value):
     """
     Calculates a single summary row with YoY comparison based on yearly totals.
     Includes calculation for 'Ad % Sale' based on unique weekly Total Sales.
+    Calculates absolute percentage point change for % metrics, relative otherwise.
 
     Args:
         df (pd.DataFrame): The data to summarize (already filtered by time and potentially product type).
@@ -1310,9 +1262,9 @@ def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_nam
 
     date_col = "WE Date" if "WE Date" in df.columns else None
     ad_sale_possible = ("Ad % Sale" in selected_metrics and
-                        "Sales" in df.columns and
-                        "Total Sales" in df.columns and
-                        date_col)
+                       "Sales" in df.columns and
+                       "Total Sales" in df.columns and
+                       date_col)
     if "Ad % Sale" in selected_metrics and not ad_sale_possible:
         selected_metrics = [m for m in selected_metrics if m != "Ad % Sale"] # Remove if not possible
 
@@ -1352,24 +1304,21 @@ def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_nam
                 yearly_totals[yr][base_m] = 0 # Default if base metric missing
 
         # Calculate the unique total sales denominator for Ad % Sale for this year
-            if ad_sale_possible:
-                try:
-                    df_year[date_col] = pd.to_datetime(df_year[date_col], errors='coerce')
-                    df_year_valid_dates_total = df_year.dropna(subset=[date_col])
-                    if not df_year_valid_dates_total.empty:
-                        # --- MODIFIED SECTION ---
-                        # Check if 'Marketplace' column exists and use it for uniqueness
-                        unique_subset_summary = [date_col]
-                        if "Marketplace" in df_year_valid_dates_total.columns:
-                             unique_subset_summary.append("Marketplace")
-
-                        unique_weekly_totals_for_sum = df_year_valid_dates_total.drop_duplicates(subset=unique_subset_summary)
-                        # --- END MODIFIED SECTION ---
-
-                        yearly_total_sales_denom[yr] = pd.to_numeric(unique_weekly_totals_for_sum['Total Sales'], errors='coerce').fillna(0).sum()
-                except Exception as e:
-                    # st.warning(f"Could not calculate total sales denominator for summary year {yr}: {e}")
-                    yearly_total_sales_denom[yr] = 0
+        if ad_sale_possible:
+             try:
+                 df_year[date_col] = pd.to_datetime(df_year[date_col], errors='coerce')
+                 df_year_valid_dates_total = df_year.dropna(subset=[date_col])
+                 if not df_year_valid_dates_total.empty:
+                     # --- MODIFIED SECTION ---
+                     unique_subset_summary = [date_col]
+                     if "Marketplace" in df_year_valid_dates_total.columns:
+                          unique_subset_summary.append("Marketplace")
+                     unique_weekly_totals_for_sum = df_year_valid_dates_total.drop_duplicates(subset=unique_subset_summary)
+                     # --- END MODIFIED SECTION ---
+                     yearly_total_sales_denom[yr] = pd.to_numeric(unique_weekly_totals_for_sum['Total Sales'], errors='coerce').fillna(0).sum()
+             except Exception as e:
+                 # st.warning(f"Could not calculate total sales denominator for summary year {yr}: {e}")
+                 yearly_total_sales_denom[yr] = 0
 
 
     # --- Calculate Yearly Totals for Derived Metrics & Populate summary_row_data ---
@@ -1379,7 +1328,7 @@ def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_nam
 
             calculated_value = np.nan # Default
             if metric == "CTR":
-                calculated_value = (totals_yr.get("Clicks", 0) / totals_yr.get("Impressions", 0) * 100) if totals_yr.get("Impressions", 0) > 0 else 0
+                 calculated_value = (totals_yr.get("Clicks", 0) / totals_yr.get("Impressions", 0) * 100) if totals_yr.get("Impressions", 0) > 0 else 0
             elif metric == "CVR":
                  calculated_value = (totals_yr.get("Orders", 0) / totals_yr.get("Clicks", 0) * 100) if totals_yr.get("Clicks", 0) > 0 else 0
             elif metric == "CPC":
@@ -1389,11 +1338,11 @@ def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_nam
             elif metric == "ROAS":
                  calculated_value = (totals_yr.get("Sales", 0) / totals_yr.get("Spend", 0)) if totals_yr.get("Spend", 0) > 0 else np.nan
             elif metric == "Ad % Sale": # Use the pre-calculated denominator for this year
-                total_sales_denom_yr = yearly_total_sales_denom.get(yr, 0)
-                if total_sales_denom_yr > 0:
-                    calculated_value = (totals_yr.get("Sales", 0) / total_sales_denom_yr * 100)
-                else:
-                    calculated_value = np.nan # Denominator is 0 or missing
+                 total_sales_denom_yr = yearly_total_sales_denom.get(yr, 0)
+                 if total_sales_denom_yr > 0:
+                     calculated_value = (totals_yr.get("Sales", 0) / total_sales_denom_yr * 100)
+                 else:
+                     calculated_value = np.nan # Denominator is 0 or missing
             elif metric in totals_yr: # It was a base metric already summed
                  calculated_value = totals_yr.get(metric)
 
@@ -1407,28 +1356,34 @@ def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_nam
                 yearly_totals[yr][metric] = calculated_value # Update the dictionary
             summary_row_data[f"{metric} {yr}"] = calculated_value # Add to the final row data
 
-    # --- Calculate % Change (if applicable) ---
+    # --- Calculate % Change (if applicable) <<< MODIFIED >>> ---
     if len(years_to_process) >= 2:
         curr_yr, prev_yr = years_to_process[-1], years_to_process[-2]
+        # Define the set of metrics that are already percentages
+        percentage_metrics = {"CTR", "CVR", "ACOS", "Ad % Sale"}
 
         for metric in selected_metrics:
             val_curr = yearly_totals.get(curr_yr, {}).get(metric, np.nan)
             val_prev = yearly_totals.get(prev_yr, {}).get(metric, np.nan)
 
             pct_change = np.nan # Default
-            if pd.notna(val_curr) and pd.notna(val_prev):
-                if val_prev != 0:
-                    pct_change = ((val_curr - val_prev) / abs(val_prev)) * 100
-                elif val_curr > 0: # Previous was 0, current is positive -> Treat as NaN for summary
-                    pct_change = np.nan # Avoid Inf in summary change
-                elif val_curr == 0: # Previous was 0, current is 0
-                     pct_change = 0.0
-                # else val_curr < 0 (Previous 0), remains NaN
 
-            elif pd.notna(val_curr) and pd.isna(val_prev):
-                 pct_change = np.nan # Growth from nothing -> Treat as NaN for summary
+            if pd.notna(val_curr) and pd.notna(val_prev):
+                if metric in percentage_metrics:
+                    # --- Calculate Absolute Percentage Point Difference ---
+                    pct_change = val_curr - val_prev
+                else:
+                    # --- Calculate Relative Percentage Change (Original Logic) ---
+                    if val_prev != 0:
+                        pct_change = ((val_curr - val_prev) / abs(val_prev)) * 100
+                    elif val_curr == 0: # Previous was 0, current is 0 -> 0% change
+                        pct_change = 0.0
+                    # else: remains NaN (e.g., growth from 0, handle as NaN in summary)
+
+            # Handle cases where only one value exists (remains NaN from default init)
 
             summary_row_data[f"{metric} % Change"] = pct_change
+    # --- End % Change Calculation ---
 
 
     # --- Create DataFrame and Order Columns ---
@@ -1452,6 +1407,99 @@ def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_nam
     return summary_df
 
 # =============================================================================
+# --- Title and Logo ---
+# =============================================================================
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("Advertising Dashboard 📊")
+with col2:
+    # Wrap image loading in a try-except block
+    try:
+        st.image("logo.png", width=300)
+    except Exception as e:
+        st.warning(f"Could not load logo.png: {e}")
+
+
+# =============================================================================
+# --- Sidebar File Uploader for Advertising Data <<< MODIFIED >>> ---
+# =============================================================================
+st.sidebar.header("Advertising Data")
+advertising_file = st.sidebar.file_uploader("Upload Advertising Data (CSV)", type=["csv"], key="adv_file")
+if advertising_file is not None:
+    # --- Data Loading and Initial Filtering ---
+    try:
+        st.session_state["ad_data"] = pd.read_csv(advertising_file)
+
+        # --- Marketplace Selector ---
+        if "Marketplace" in st.session_state["ad_data"].columns:
+            available_marketplaces = sorted(st.session_state["ad_data"]["Marketplace"].unique())
+            # Ensure options are strings for selectbox, handle potential NaN
+            available_marketplaces = [str(mp) for mp in available_marketplaces if pd.notna(mp)]
+
+            if available_marketplaces: # Only show selector if marketplaces exist
+                # --- MODIFIED SECTION START ---
+                # Define the desired default marketplace
+                target_default_marketplace = "US"
+
+                # Construct the full list of options for the selectbox
+                full_options = ["All Marketplaces"] + available_marketplaces
+
+                # Determine the default index
+                default_index = 0 # Start with the default index for "All Marketplaces"
+                if target_default_marketplace in full_options:
+                    try:
+                        # Find the index of the target default marketplace
+                        default_index = full_options.index(target_default_marketplace)
+                    except ValueError:
+                        # This case should technically not happen because of the 'in' check,
+                        # but it's safe to leave the default_index at 0.
+                        st.sidebar.warning(f"'{target_default_marketplace}' was found but index lookup failed. Defaulting to 'All Marketplaces'.")
+                else:
+                    # Optional: Warn if the desired default isn't even in the list
+                    # st.sidebar.info(f"Default marketplace '{target_default_marketplace}' not found in data. Defaulting to 'All Marketplaces'.")
+                    pass # Keep default_index = 0
+
+                # Create the selectbox using the determined default index
+                selected_marketplace = st.sidebar.selectbox(
+                    "Select Marketplace",
+                    options=full_options, # Use the full list here
+                    index=default_index,  # Set the calculated default index
+                    key="marketplace_selector"
+                )
+                # --- MODIFIED SECTION END ---
+
+                # Filter data based on selected marketplace
+                if selected_marketplace != "All Marketplaces":
+                    st.session_state["filtered_ad_data"] = st.session_state["ad_data"][
+                        st.session_state["ad_data"]["Marketplace"].astype(str) == selected_marketplace
+                    ].copy() # Use .copy() to avoid SettingWithCopyWarning
+                else:
+                    st.session_state["filtered_ad_data"] = st.session_state["ad_data"].copy()
+            else:
+                st.sidebar.warning("No valid marketplaces found in 'Marketplace' column.")
+                st.session_state["filtered_ad_data"] = st.session_state["ad_data"].copy() # Use all data if no valid marketplaces
+        else:
+            # If no Marketplace column exists, use all data
+            st.session_state["filtered_ad_data"] = st.session_state["ad_data"].copy()
+
+        # --- PREPROCESSING STEP (Now defined above) ---
+        # Perform preprocessing ONCE and store it
+        if "filtered_ad_data" in st.session_state and not st.session_state["filtered_ad_data"].empty:
+            # Call the function which is now defined above this point
+            st.session_state["ad_data_processed"] = preprocess_ad_data(st.session_state["filtered_ad_data"])
+        else:
+            # Handle case where filtered data might be empty even if file loaded
+            if "ad_data_processed" in st.session_state: del st.session_state["ad_data_processed"]
+        # --- End Preprocessing Step ---
+
+    except Exception as e:
+        st.error(f"Error reading or processing CSV file: {e}")
+        # Reset session state if error occurs
+        if "ad_data" in st.session_state: del st.session_state["ad_data"]
+        if "filtered_ad_data" in st.session_state: del st.session_state["filtered_ad_data"]
+        if "ad_data_processed" in st.session_state: del st.session_state["ad_data_processed"] # Also clear processed data
+
+# =============================================================================
 # Display Dashboard Tabs Only When Data is Uploaded and Processed
 # =============================================================================
 # Check if processed data exists and is not empty
@@ -1464,8 +1512,8 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
         "Sponsored Display"
     ])
 
-    # -------------------------------
-    # Tab 0: YOY Comparison
+# -------------------------------
+    # Tab 0: YOY Comparison <<< MODIFIED >>>
     # -------------------------------
     with tabs_adv[0]:
         st.markdown("### YOY Comparison")
@@ -1520,22 +1568,21 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                     default_tf_index = timeframe_options.index("Last 4 Weeks") if "Last 4 Weeks" in timeframe_options else 0
                     selected_timeframe = st.selectbox("Select Timeframe:", timeframe_options, index=default_tf_index, key="yoy_timeframe")
                 with col3:
-                     if selected_years:
+                    if selected_years:
                          weeks_in_selected_years = ad_data_overview[ad_data_overview["Year"].isin(selected_years)]["Week"].unique()
                          available_weeks = sorted([w for w in weeks_in_selected_years if pd.notna(w)])
                          available_weeks_str = ["Select..."] + [str(int(w)) for w in available_weeks]
-                     else: available_weeks_str = ["Select..."]
-                     is_specific_week = (selected_timeframe == "Specific Week")
-                     selected_week_option = st.selectbox("Select Week:", available_weeks_str, index=0, key="yoy_week", disabled=(not is_specific_week))
+                    else: available_weeks_str = ["Select..."]
+                    is_specific_week = (selected_timeframe == "Specific Week")
+                    selected_week_option = st.selectbox("Select Week:", available_weeks_str, index=0, key="yoy_week", disabled=(not is_specific_week))
 
                 with col4:
-                    # Updated metrics list including Ad % Sale
+                    # <<< MODIFIED Metrics Selection >>>
                     all_metrics = [
                         "Impressions", "Clicks", "Spend", "Sales", "Orders", "Units",
-                        "CTR", "CVR", "CPC", "ACOS", "ROAS", "Ad % Sale" # Added Ad % Sale
+                        "CTR", "CVR", "CPC", "ACOS", "ROAS", "Ad % Sale"
                     ]
                     calculable_metrics = {"CTR", "CVR", "CPC", "ACOS", "ROAS", "Ad % Sale"}
-                    # Ensure base columns for grouping/calculations exist
                     required_grouping_cols = {"Product", "Portfolio Name", "Match Type", "RTW/Prospecting", "Campaign Name", "WE Date", "Total Sales"} & set(ad_data_overview.columns)
 
                     # Available metrics are those directly in columns OR those that can be calculated
@@ -1544,7 +1591,7 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                         if m in ad_data_overview.columns:
                             available_display_metrics.append(m)
                         elif m in calculable_metrics:
-                            # Add check if required base cols for this specific calculable metric exist
+                            # Check if required base cols for this specific calculable metric exist
                             can_calc_m = False
                             if m == "CTR" and {"Clicks", "Impressions"}.issubset(ad_data_overview.columns): can_calc_m = True
                             elif m == "CVR" and {"Orders", "Clicks"}.issubset(ad_data_overview.columns): can_calc_m = True
@@ -1554,13 +1601,28 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                             elif m == "Ad % Sale" and {"Sales", "Total Sales", "WE Date"}.issubset(ad_data_overview.columns): can_calc_m = True # Check specific cols for Ad % Sale
                             if can_calc_m: available_display_metrics.append(m)
 
-                    default_metrics_list = ["Spend", "Sales", "Ad % Sale", "ACOS", "ROAS", "CTR"] # Added Ad % Sale to default
+                    # --- MODIFIED Default Logic ---
+                    # Define the NEW desired default list of metrics
+                    default_metrics_list = ["Spend", "Sales", "Ad % Sale", "ACOS"]
+                    # Filter the desired default list based on actually available metrics
                     default_metrics = [m for m in default_metrics_list if m in available_display_metrics]
-                    selected_metrics = st.multiselect("Select Metrics:", available_display_metrics, default=default_metrics, key="yoy_metrics")
+                    # --- End MODIFIED Default Logic ---
+
+                    # Create the multiselect widget
+                    selected_metrics = st.multiselect("Select Metrics:",
+                                                      available_display_metrics,
+                                                      default=default_metrics, # Uses the filtered default list
+                                                      key="yoy_metrics")
+
+                    # Fallback logic if user deselects all
                     if not selected_metrics:
                         st.warning("Please select at least one metric.")
-                        # Provide a fallback default if user deselects all
-                        selected_metrics = default_metrics[:2] if len(default_metrics) >= 2 else available_display_metrics[:1]
+                        # Fallback: try to use the desired defaults that ARE available,
+                        # otherwise use the first available metric overall.
+                        fallback_defaults = default_metrics[:2] if len(default_metrics) >= 2 else default_metrics[:1] if default_metrics else available_display_metrics[:1]
+                        selected_metrics = fallback_defaults
+                    # <<< End MODIFIED Metrics Selection >>>
+
 
                 selected_week = int(selected_week_option) if is_specific_week and selected_week_option != "Select..." else None
 
@@ -1660,7 +1722,7 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                                     st.info(f"No displayable portfolio data for Product Type '{selected_product_type_portfolio}' after processing.")
 
                         elif not filtered_data_for_tables.empty:
-                                st.info("Portfolio analysis requires a 'Portfolio Name' column.")
+                            st.info("Portfolio analysis requires a 'Portfolio Name' column.")
 
 
                         # ----------------------------------------------------------------
@@ -1801,7 +1863,7 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                                 st.info(f"No displayable {campaign_col_name} data after processing (check metric availability).")
 
                         elif not filtered_data_for_tables.empty:
-                             st.info(f"Campaign-level analysis requires a '{campaign_col_name}' column.")
+                            st.info(f"Campaign-level analysis requires a '{campaign_col_name}' column.")
 
     # -------------------------------
     # Tab 1: Sponsored Products
@@ -1911,7 +1973,7 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                 if ad_data_sb_filtered_initial.empty:
                     st.warning(f"No {product_type_sb} data found after initial filtering.")
                 else:
-                     # --- Filters for SB Tab ---
+                    # --- Filters for SB Tab ---
                     with st.expander("Filters", expanded=True):
                         col1_sb, col2_sb = st.columns(2)
                         with col1_sb:
@@ -2005,7 +2067,7 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
                 if ad_data_sd_filtered_initial.empty:
                      st.warning(f"No {product_type_sd} data found after initial filtering.")
                 else:
-                     # --- Filters for SD Tab ---
+                    # --- Filters for SD Tab ---
                     with st.expander("Filters", expanded=True):
                         col1_sd, col2_sd = st.columns(2)
                         with col1_sd:
