@@ -403,183 +403,282 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
     if filtered_data.empty:
         return go.Figure()
 
+    # --- Define required base components for derived metrics ---
     metric_required_cols = {metric}
     base_needed_for_metric = set()
-    if metric == "CTR": base_needed_for_metric.update({"Clicks", "Impressions"})
-    elif metric == "CVR": base_needed_for_metric.update({"Orders", "Clicks"})
-    elif metric == "ACOS": base_needed_for_metric.update({"Spend", "Sales"})
-    elif metric == "ROAS": base_needed_for_metric.update({"Sales", "Spend"})
-    elif metric == "CPC": base_needed_for_metric.update({"Spend", "Clicks"})
-    elif metric == "Ad % Sale": base_needed_for_metric.update({"Sales"})
+    is_derived_metric = False
+    if metric == "CTR": base_needed_for_metric.update({"Clicks", "Impressions"}); is_derived_metric = True
+    elif metric == "CVR": base_needed_for_metric.update({"Orders", "Clicks"}); is_derived_metric = True
+    elif metric == "ACOS": base_needed_for_metric.update({"Spend", "Sales"}); is_derived_metric = True
+    elif metric == "ROAS": base_needed_for_metric.update({"Sales", "Spend"}); is_derived_metric = True
+    elif metric == "CPC": base_needed_for_metric.update({"Spend", "Clicks"}); is_derived_metric = True
+    elif metric == "Ad % Sale": base_needed_for_metric.update({"Sales"}); is_derived_metric = True # Also needs external denom
 
-    metric_exists = metric in filtered_data.columns
-    can_calculate_base = base_needed_for_metric.issubset(filtered_data.columns)
+    # --- Check if necessary columns exist for the selected metric ---
+    metric_exists_in_input = metric in filtered_data.columns
+    base_components_exist = base_needed_for_metric.issubset(filtered_data.columns)
 
     ad_sale_check_passed = True
     if metric == "Ad % Sale":
-        if "Sales" not in filtered_data.columns:
+        if not base_components_exist: # Check 'Sales' column exists
              st.warning(f"Metric chart requires 'Sales' column for 'Ad % Sale'.")
              ad_sale_check_passed = False
         if weekly_total_sales_data is None or weekly_total_sales_data.empty:
+             st.info(f"Denominator data (weekly total sales) not available for 'Ad % Sale' calculation.") # Use info, maybe intended
              ad_sale_check_passed = False
         elif not {"Year", "Week", "Weekly_Total_Sales"}.issubset(weekly_total_sales_data.columns):
              st.warning(f"Passed 'weekly_total_sales_data' is missing required columns (Year, Week, Weekly_Total_Sales).")
              ad_sale_check_passed = False
 
-    if not metric_exists and not can_calculate_base:
-        if not (metric == "Ad % Sale" and "Sales" in filtered_data.columns):
-             missing = (base_needed_for_metric if not base_needed_for_metric.issubset(filtered_data.columns) else set()) | (metric_required_cols if not metric_exists else set())
-             if missing: st.warning(f"Metric chart requires column(s): {missing} in the filtered data.")
-             return go.Figure()
-    if metric == "Ad % Sale" and not ad_sale_check_passed:
-        st.warning(f"Cannot calculate 'Ad % Sale'. Check required columns ('Sales') and denominator data source.")
-        return go.Figure()
+    # If it's a derived metric, we MUST have its base components
+    if is_derived_metric and not base_components_exist:
+         # Specific check for Ad % Sale denominator availability
+         if metric == "Ad % Sale" and not ad_sale_check_passed:
+              st.warning(f"Cannot calculate 'Ad % Sale'. Check required 'Sales' column and denominator data source.")
+              return go.Figure()
+         elif metric != "Ad % Sale": # For other derived metrics if base components are missing
+              missing_bases = base_needed_for_metric - set(filtered_data.columns)
+              st.warning(f"Cannot calculate derived metric '{metric}'. Missing required base columns: {missing_bases}")
+              return go.Figure()
 
+    # If it's NOT a derived metric, it MUST exist in the input data
+    if not is_derived_metric and not metric_exists_in_input:
+         st.warning(f"Metric chart requires column '{metric}' in the data.")
+         return go.Figure()
+
+    # --- Start Plotting ---
     years = sorted(filtered_data["Year"].dropna().unique().astype(int))
     fig = go.Figure()
 
     if metric in ["CTR", "CVR", "ACOS", "Ad % Sale"]: hover_suffix = "%"; hover_format = ".1f"
     elif metric in ["Spend", "Sales"]: hover_suffix = ""; hover_format = "$,.2f"
     elif metric in ["ROAS", "CPC"]: hover_suffix = ""; hover_format = ".2f"
-    else: hover_suffix = ""; hover_format = ",.0f"
+    else: hover_suffix = ""; hover_format = ",.0f" # Impressions, Clicks, Orders, Units
     base_hover_template = f"Date: %{{customdata[1]|%Y-%m-%d}}<br>Week: %{{customdata[0]}}<br>{metric}: %{{y:{hover_format}}}{hover_suffix}<extra></extra>"
 
     processed_years = []
     colors = px.colors.qualitative.Plotly
 
+    # ========================
+    # YoY Plotting Logic
+    # ========================
     if show_yoy and len(years) > 1:
-        base_needed_yoy = base_needed_for_metric if not metric_exists else {metric} | base_needed_for_metric
-        if metric == "Ad % Sale": base_needed_yoy.add("Sales")
-        base_needed_yoy.add("WE Date")
-        agg_cols_yoy = list(base_needed_yoy & set(filtered_data.columns))
+        # Define columns needed for aggregation: base components + WE Date
+        cols_to_agg_yoy = list(base_needed_for_metric | {metric} | {"WE Date"})
+        # Ensure only columns actually present in the data are included
+        actual_cols_to_agg_yoy = list(set(cols_to_agg_yoy) & set(filtered_data.columns))
 
-        if not agg_cols_yoy:
-             st.warning(f"Missing required columns for metric '{metric}' aggregation (YoY).")
+        if "WE Date" not in actual_cols_to_agg_yoy: # WE Date is critical for hover
+             st.warning("Missing 'WE Date' for aggregation (YoY).")
              return go.Figure()
 
         try:
             agg_dict_yoy = {}
-            for col in agg_cols_yoy:
-                if col == 'WE Date': agg_dict_yoy[col] = 'min'
-                elif pd.api.types.is_numeric_dtype(filtered_data[col]): agg_dict_yoy[col] = "sum"
+            numeric_aggregated = False
+            for col in actual_cols_to_agg_yoy:
+                if col == 'WE Date':
+                    agg_dict_yoy[col] = 'min' # Get earliest date within the week for hover
+                # Aggregate ONLY the base components or the original metric IF it's not derived
+                elif pd.api.types.is_numeric_dtype(filtered_data[col]) and \
+                     (col in base_needed_for_metric or (col == metric and not is_derived_metric)):
+                    agg_dict_yoy[col] = "sum"
+                    numeric_aggregated = True
 
-            if not any(v == 'sum' for v in agg_dict_yoy.values()):
-                 st.warning("No numeric columns found to aggregate for the YoY chart.")
+            if not numeric_aggregated and not is_derived_metric:
+                 st.warning(f"No numeric column found for metric '{metric}' to aggregate for the YoY chart.")
+                 return go.Figure()
+            elif not base_components_exist and is_derived_metric:
+                 # This case should have been caught earlier, but double-check
+                 st.warning(f"Cannot proceed with YoY chart for derived metric '{metric}' due to missing base columns.")
                  return go.Figure()
 
+            # Aggregate: Sum up base components (and original metric if not derived) by Year/Week
             grouped = filtered_data.groupby(["Year", "Week"], as_index=False).agg(agg_dict_yoy)
             grouped["WE Date"] = pd.to_datetime(grouped["WE Date"])
+
         except Exception as e:
             st.warning(f"Could not group data by week for YoY chart: {e}")
             return go.Figure()
 
-        metric_calculated = metric in grouped.columns
-        if not metric_calculated:
-            if metric == "CTR" and {"Clicks", "Impressions"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Clicks"] / r["Impressions"] * 100) if r.get("Impressions") else 0, axis=1)
-            elif metric == "CVR" and {"Orders", "Clicks"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Orders"] / r["Clicks"] * 100) if r.get("Clicks") else 0, axis=1)
-            elif metric == "ACOS" and {"Spend", "Sales"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Sales"] * 100) if r.get("Sales") else np.nan, axis=1)
-            elif metric == "ROAS" and {"Sales", "Spend"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Sales"] / r["Spend"]) if r.get("Spend") else np.nan, axis=1)
-            elif metric == "CPC" and {"Spend", "Clicks"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Clicks"]) if r.get("Clicks") else np.nan, axis=1)
-            elif metric == "Ad % Sale" and {"Sales"}.issubset(grouped.columns) and weekly_total_sales_data is not None:
-                 try:
-                      temp_denom = weekly_total_sales_data.copy()
-                      temp_denom['Year'] = temp_denom['Year'].astype(grouped['Year'].dtype)
-                      temp_denom['Week'] = temp_denom['Week'].astype(grouped['Week'].dtype)
-                      grouped = pd.merge(grouped, temp_denom[['Year', 'Week', 'Weekly_Total_Sales']], on=['Year', 'Week'], how='left')
-                      grouped[metric] = grouped.apply(lambda r: (r['Sales'] / r['Weekly_Total_Sales'] * 100) if pd.notna(r['Weekly_Total_Sales']) and r['Weekly_Total_Sales'] > 0 else np.nan, axis=1)
-                 except Exception as e:
-                      st.warning(f"Failed to merge/calculate Ad % Sale for YoY chart: {e}")
-                      grouped[metric] = np.nan
+        # --- *** ALWAYS RECALCULATE DERIVED METRICS POST-AGGREGATION *** ---
+        metric_calculated_successfully = False
+        if is_derived_metric:
+            if metric == "CTR":
+                if {"Clicks", "Impressions"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Clicks"] / r["Impressions"] * 100) if r.get("Impressions") else 0, axis=1).round(1) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "CVR":
+                 if {"Orders", "Clicks"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Orders"] / r["Clicks"] * 100) if r.get("Clicks") else 0, axis=1).round(1) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "ACOS":
+                if {"Spend", "Sales"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Sales"] * 100) if r.get("Sales") else np.nan, axis=1).round(1) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "ROAS":
+                if {"Sales", "Spend"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Sales"] / r["Spend"]) if r.get("Spend") else np.nan, axis=1).round(2) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "CPC":
+                if {"Spend", "Clicks"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Clicks"]) if r.get("Clicks") else np.nan, axis=1).round(2) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "Ad % Sale":
+                if {"Sales"}.issubset(grouped.columns) and ad_sale_check_passed: # Use flag
+                    try:
+                        temp_denom = weekly_total_sales_data.copy()
+                        # Ensure data types match for merge
+                        if 'Year' in grouped.columns and 'Year' in temp_denom.columns: temp_denom['Year'] = temp_denom['Year'].astype(grouped['Year'].dtype)
+                        if 'Week' in grouped.columns and 'Week' in temp_denom.columns: temp_denom['Week'] = temp_denom['Week'].astype(grouped['Week'].dtype)
+                        # Perform merge safely
+                        grouped_merged = pd.merge(grouped, temp_denom[['Year', 'Week', 'Weekly_Total_Sales']], on=['Year', 'Week'], how='left')
+                        grouped_merged[metric] = grouped_merged.apply(lambda r: (r['Sales'] / r['Weekly_Total_Sales'] * 100) if pd.notna(r['Weekly_Total_Sales']) and r['Weekly_Total_Sales'] > 0 else np.nan, axis=1).round(1) # Added rounding
+                        grouped = grouped_merged.drop(columns=['Weekly_Total_Sales'], errors='ignore') # Drop temp col
+                        metric_calculated_successfully = True
+                    except Exception as e:
+                        st.warning(f"Failed to merge/calculate Ad % Sale for YoY chart: {e}")
+                        grouped[metric] = np.nan # Ensure column exists even if calculation fails
+                else:
+                     grouped[metric] = np.nan # Ensure column exists if calculation wasn't possible
 
+            if not metric_calculated_successfully:
+                # This means components were missing post-aggregation somehow, should not happen if checks above passed
+                st.error(f"Internal Error: Failed to recalculate derived metric '{metric}' (YoY). Check base columns post-aggregation.")
+                return go.Figure()
+        # --- End Recalculation Block ---
+
+        # Ensure the final metric column exists (either summed directly or recalculated)
         if metric not in grouped.columns:
-             st.warning(f"Could not calculate or find metric '{metric}' for weekly YoY chart.")
-             return go.Figure()
+            st.warning(f"Metric column '{metric}' not found after aggregation/calculation (YoY).")
+            return go.Figure()
 
+        # Handle Inf/-Inf values after calculation/aggregation
         grouped[metric] = grouped[metric].replace([np.inf, -np.inf], np.nan)
 
+        # --- Plotting YoY data ---
         min_week_data, max_week_data = 53, 0
         for i, year in enumerate(years):
-             year_data = grouped[grouped["Year"] == year].sort_values("Week")
-             if year_data.empty or year_data[metric].isnull().all(): continue
-             processed_years.append(year)
-             min_week_data = min(min_week_data, year_data["Week"].min())
-             max_week_data = max(max_week_data, year_data["Week"].max())
-             custom_data_hover = year_data[['Week', 'WE Date']]
-             fig.add_trace(
-                 go.Scatter(x=year_data["Week"], y=year_data[metric], mode="lines+markers", name=f"{year}",
-                            line=dict(color=colors[i % len(colors)], width=2), marker=dict(size=6),
-                            customdata=custom_data_hover, hovertemplate=base_hover_template)
-             )
+            year_data = grouped[grouped["Year"] == year].sort_values("Week")
+            if year_data.empty or year_data[metric].isnull().all(): continue
 
+            processed_years.append(year)
+            min_week_data = min(min_week_data, year_data["Week"].min())
+            max_week_data = max(max_week_data, year_data["Week"].max())
+            custom_data_hover = year_data[['Week', 'WE Date']] # WE Date from 'min' aggregation
+
+            fig.add_trace(
+                go.Scatter(x=year_data["Week"], y=year_data[metric], mode="lines+markers", name=f"{year}",
+                           line=dict(color=colors[i % len(colors)], width=2), marker=dict(size=6),
+                           customdata=custom_data_hover, hovertemplate=base_hover_template)
+            )
+
+        # Add month annotations if data was plotted
         if processed_years:
             month_approx_weeks = { 1: 2.5, 2: 6.5, 3: 10.5, 4: 15, 5: 19.5, 6: 24, 7: 28, 8: 32.5, 9: 37, 10: 41.5, 11: 46, 12: 50.5 }
             month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
             for month_num, week_val in month_approx_weeks.items():
                 if week_val >= min_week_data - 1 and week_val <= max_week_data + 1:
-                     fig.add_annotation(x=week_val, y=-0.12, xref="x", yref="paper", text=month_names[month_num-1], showarrow=False, font=dict(size=10, color="grey"))
+                    fig.add_annotation(x=week_val, y=-0.12, xref="x", yref="paper", text=month_names[month_num-1], showarrow=False, font=dict(size=10, color="grey"))
             fig.update_layout(xaxis_range=[max(0, min_week_data - 1), min(54, max_week_data + 1)])
+
         fig.update_layout(xaxis_title="Week of Year", xaxis_showticklabels=True, legend_title="Year", margin=dict(b=70))
 
-    else: # Non-YoY Plotting
-        base_needed_noyoy = base_needed_for_metric if not metric_exists else {metric} | base_needed_for_metric
-        if metric == "Ad % Sale": base_needed_noyoy.add("Sales")
-        base_needed_noyoy.update({"WE Date", "Year", "Week"})
-        agg_cols_noyoy = list(base_needed_noyoy & set(filtered_data.columns))
+    # ========================
+    # Non-YoY Plotting Logic
+    # ========================
+    else:
+        # Define columns needed for aggregation: base components + WE Date, Year, Week
+        cols_to_agg_noyoy = list(base_needed_for_metric | {metric} | {"WE Date", "Year", "Week"})
+        # Ensure only columns actually present in the data are included
+        actual_cols_to_agg_noyoy = list(set(cols_to_agg_noyoy) & set(filtered_data.columns))
 
-        if not agg_cols_noyoy:
-            st.warning(f"Missing base columns to calculate '{metric}' over time (non-YoY).")
-            return go.Figure()
+        if not {"WE Date", "Year", "Week"}.issubset(actual_cols_to_agg_noyoy): # Critical keys
+             st.warning("Missing 'WE Date', 'Year', or 'Week' for aggregation (non-YoY).")
+             return go.Figure()
 
         try:
-             agg_dict_noyoy = {}
-             for col in agg_cols_noyoy:
-                 if col not in ['WE Date', 'Year', 'Week'] and pd.api.types.is_numeric_dtype(filtered_data[col]):
-                      agg_dict_noyoy[col] = "sum"
-             if not agg_dict_noyoy:
-                  st.warning("No numeric metrics to aggregate for time chart (non-YoY).")
-                  return go.Figure()
-             grouping_keys_noyoy = ["WE Date", "Year", "Week"]
-             grouped = filtered_data.groupby(grouping_keys_noyoy, as_index=False).agg(agg_dict_noyoy)
-             grouped["WE Date"] = pd.to_datetime(grouped["WE Date"])
+            agg_dict_noyoy = {}
+            numeric_aggregated = False
+            grouping_keys_noyoy = ["WE Date", "Year", "Week"] # Group by specific date point
+            for col in actual_cols_to_agg_noyoy:
+                 if col not in grouping_keys_noyoy and pd.api.types.is_numeric_dtype(filtered_data[col]) and \
+                    (col in base_needed_for_metric or (col == metric and not is_derived_metric)):
+                    agg_dict_noyoy[col] = "sum"
+                    numeric_aggregated = True
+
+            if not numeric_aggregated and not is_derived_metric:
+                 st.warning(f"No numeric column found for metric '{metric}' to aggregate for the time chart (non-YoY).")
+                 return go.Figure()
+            elif not base_components_exist and is_derived_metric:
+                 st.warning(f"Cannot proceed with time chart for derived metric '{metric}' due to missing base columns (non-YoY).")
+                 return go.Figure()
+
+            # Aggregate: Sum up base components (and original metric if not derived) by Date/Year/Week
+            grouped = filtered_data.groupby(grouping_keys_noyoy, as_index=False).agg(agg_dict_noyoy)
+            grouped["WE Date"] = pd.to_datetime(grouped["WE Date"]) # Ensure datetime type
+
         except Exception as e:
-             st.warning(f"Could not group data for time chart (non-YoY): {e}")
-             return go.Figure()
-
-        metric_calculated = metric in grouped.columns
-        if not metric_calculated:
-            if metric == "CTR" and {"Clicks", "Impressions"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Clicks"] / r["Impressions"] * 100) if r.get("Impressions", 0) else 0, axis=1)
-            elif metric == "CVR" and {"Orders", "Clicks"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Orders"] / r["Clicks"] * 100) if r.get("Clicks", 0) else 0, axis=1)
-            elif metric == "ACOS" and {"Spend", "Sales"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Sales"] * 100) if r.get("Sales", 0) else np.nan, axis=1)
-            elif metric == "ROAS" and {"Sales", "Spend"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Sales"] / r["Spend"]) if r.get("Spend", 0) else np.nan, axis=1)
-            elif metric == "CPC" and {"Spend", "Clicks"}.issubset(grouped.columns):
-                 grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Clicks"]) if r.get("Clicks", 0) else np.nan, axis=1)
-            elif metric == "Ad % Sale" and {"Sales"}.issubset(grouped.columns) and weekly_total_sales_data is not None:
-                 try:
-                      temp_denom = weekly_total_sales_data.copy()
-                      temp_denom['Year'] = temp_denom['Year'].astype(grouped['Year'].dtype)
-                      temp_denom['Week'] = temp_denom['Week'].astype(grouped['Week'].dtype)
-                      grouped = pd.merge(grouped, temp_denom[['Year', 'Week', 'Weekly_Total_Sales']], on=['Year', 'Week'], how='left')
-                      grouped[metric] = grouped.apply(lambda r: (r['Sales'] / r['Weekly_Total_Sales'] * 100) if pd.notna(r['Weekly_Total_Sales']) and r['Weekly_Total_Sales'] > 0 else np.nan, axis=1)
-                 except Exception as e:
-                      st.warning(f"Failed to merge/calculate Ad % Sale for non-YoY chart: {e}")
-                      grouped[metric] = np.nan
-
-        if metric not in grouped.columns:
-             st.warning(f"Could not calculate or find '{metric}' over time (non-YoY).")
-             return go.Figure()
-
-        grouped[metric] = grouped[metric].replace([np.inf, -np.inf], np.nan)
-        if grouped[metric].isnull().all():
+            st.warning(f"Could not group data for time chart (non-YoY): {e}")
             return go.Figure()
+
+        # --- *** ALWAYS RECALCULATE DERIVED METRICS POST-AGGREGATION *** ---
+        metric_calculated_successfully = False
+        if is_derived_metric:
+            if metric == "CTR":
+                if {"Clicks", "Impressions"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Clicks"] / r["Impressions"] * 100) if r.get("Impressions") else 0, axis=1).round(1) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "CVR":
+                 if {"Orders", "Clicks"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Orders"] / r["Clicks"] * 100) if r.get("Clicks") else 0, axis=1).round(1) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "ACOS":
+                if {"Spend", "Sales"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Sales"] * 100) if r.get("Sales") else np.nan, axis=1).round(1) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "ROAS":
+                if {"Sales", "Spend"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Sales"] / r["Spend"]) if r.get("Spend") else np.nan, axis=1).round(2) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "CPC":
+                if {"Spend", "Clicks"}.issubset(grouped.columns):
+                    grouped[metric] = grouped.apply(lambda r: (r["Spend"] / r["Clicks"]) if r.get("Clicks") else np.nan, axis=1).round(2) # Added rounding
+                    metric_calculated_successfully = True
+            elif metric == "Ad % Sale":
+                if {"Sales"}.issubset(grouped.columns) and ad_sale_check_passed: # Use flag
+                    try:
+                        temp_denom = weekly_total_sales_data.copy()
+                        # Ensure data types match for merge
+                        if 'Year' in grouped.columns and 'Year' in temp_denom.columns: temp_denom['Year'] = temp_denom['Year'].astype(grouped['Year'].dtype)
+                        if 'Week' in grouped.columns and 'Week' in temp_denom.columns: temp_denom['Week'] = temp_denom['Week'].astype(grouped['Week'].dtype)
+                        # Perform merge safely
+                        grouped_merged = pd.merge(grouped, temp_denom[['Year', 'Week', 'Weekly_Total_Sales']], on=['Year', 'Week'], how='left')
+                        grouped_merged[metric] = grouped_merged.apply(lambda r: (r['Sales'] / r['Weekly_Total_Sales'] * 100) if pd.notna(r['Weekly_Total_Sales']) and r['Weekly_Total_Sales'] > 0 else np.nan, axis=1).round(1) # Added rounding
+                        grouped = grouped_merged.drop(columns=['Weekly_Total_Sales'], errors='ignore') # Drop temp col
+                        metric_calculated_successfully = True
+                    except Exception as e:
+                        st.warning(f"Failed to merge/calculate Ad % Sale for non-YoY chart: {e}")
+                        grouped[metric] = np.nan # Ensure column exists even if calculation fails
+                else:
+                     grouped[metric] = np.nan # Ensure column exists if calculation wasn't possible
+
+            if not metric_calculated_successfully:
+                st.error(f"Internal Error: Failed to recalculate derived metric '{metric}' (non-YoY). Check base columns post-aggregation.")
+                return go.Figure()
+        # --- End Recalculation Block ---
+
+        # Ensure the final metric column exists
+        if metric not in grouped.columns:
+            st.warning(f"Metric column '{metric}' not found after aggregation/calculation (non-YoY).")
+            return go.Figure()
+
+        # Handle Inf/-Inf values
+        grouped[metric] = grouped[metric].replace([np.inf, -np.inf], np.nan)
+
+        # --- Plotting Non-YoY data ---
+        if grouped[metric].isnull().all():
+            st.info(f"No valid data points for metric '{metric}' over time (non-YoY).")
+            return go.Figure() # Return empty figure if all values are NaN
 
         grouped = grouped.sort_values("WE Date")
         custom_data_hover_noyoy = grouped[['Week', 'WE Date']]
@@ -590,9 +689,11 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
         )
         fig.update_layout(xaxis_title="Date", showlegend=False)
 
+    # --- Final Chart Layout ---
     portfolio_title = f" for {portfolio}" if portfolio != "All Portfolios" else " for All Portfolios"
-    years_in_plot = processed_years if processed_years else years
+    years_in_plot = processed_years if (show_yoy and len(years) > 1 and processed_years) else years # Get years actually plotted
     final_chart_title = f"{metric} "
+
     if show_yoy and len(years_in_plot) > 1:
         final_chart_title += f"Weekly Comparison {portfolio_title} ({product_type})"
         final_xaxis_title = "Week of Year"
@@ -605,10 +706,12 @@ def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yo
         title=final_chart_title, xaxis_title=final_xaxis_title, yaxis_title=metric,
         hovermode="x unified", template="plotly_white", yaxis=dict(rangemode="tozero"), margin=final_margin
     )
-    if metric in ["Spend", "Sales"]: fig.update_layout(yaxis_tickprefix="$", yaxis_tickformat=",.2f")
+
+    # Apply Y-axis formatting based on the metric
+    if metric in ["Spend", "Sales", "CPC"]: fig.update_layout(yaxis_tickprefix="$", yaxis_tickformat=",.2f")
     elif metric in ["CTR", "CVR", "ACOS", "Ad % Sale"]: fig.update_layout(yaxis_ticksuffix="%", yaxis_tickformat=".1f")
-    elif metric in ["ROAS", "CPC"]: fig.update_layout(yaxis_tickformat=".2f")
-    else: fig.update_layout(yaxis_tickformat=",.0f")
+    elif metric == "ROAS": fig.update_layout(yaxis_tickformat=".2f")
+    else: fig.update_layout(yaxis_tickformat=",.0f") # Impressions, Clicks, Orders, Units
 
     return fig
 
@@ -878,61 +981,108 @@ def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics,
     return merged_table_display
 
 
+
 def style_yoy_comparison_table(df):
-    """Styles the YoY comparison table with formats and % change coloring using applymap."""
+    """Styles the YoY comparison table with formats and % change coloring using applymap.
+       Inverts colors for 'ACOS % Change'.
+    """
     if df is None or df.empty: return None
     df_copy = df.copy().replace([np.inf, -np.inf], np.nan)
 
     format_dict = {}
     highlight_change_cols = []
-    percentage_metrics = {"CTR", "CVR", "ACOS", "Ad % Sale"}
+    percentage_metrics = {"CTR", "CVR", "ACOS", "Ad % Sale"} # Metrics where change is absolute difference
 
+    # --- Determine Formats and Identify Change Columns ---
     for col in df_copy.columns:
         base_metric_match = re.match(r"([a-zA-Z\s%]+)", col)
         base_metric = base_metric_match.group(1).strip() if base_metric_match else ""
         is_change_col = "% Change" in col
-        is_metric_col = not is_change_col and any(char.isdigit() for char in col)
+        is_metric_col = not is_change_col and any(char.isdigit() for char in col) # Basic check if year is in col name
 
         if is_change_col:
             base_metric_for_change = col.replace(" % Change", "").strip()
-            if base_metric_for_change in percentage_metrics: format_dict[col] = lambda x: f"{x:+.1f} %" if pd.notna(x) else 'N/A'
-            else: format_dict[col] = lambda x: f"{x:+.1f}%" if pd.notna(x) else 'N/A'
+            # Format absolute change for percentage metrics, percentage change for others
+            if base_metric_for_change in percentage_metrics:
+                format_dict[col] = lambda x: f"{x:+.1f}%" if pd.notna(x) else 'N/A' # Use 'pt' for percentage points difference
+            else:
+                format_dict[col] = lambda x: f"{x:+.0f}%" if pd.notna(x) else 'N/A' # Standard percentage change
             highlight_change_cols.append(col)
         elif is_metric_col:
+            # Apply standard metric formatting
             if base_metric in ["Impressions", "Clicks", "Orders", "Units"]: format_dict[col] = "{:,.0f}"
             elif base_metric in ["Spend", "Sales", "CPC"]: format_dict[col] = "${:,.2f}"
             elif base_metric in ["ACOS", "CTR", "CVR", "Ad % Sale"]: format_dict[col] = '{:.1f}%'
             elif base_metric == "ROAS": format_dict[col] = '{:.2f}'
-        elif df_copy[col].dtype == 'object': format_dict[col] = "{}"
+            # Add other specific formats if needed
+        elif df_copy[col].dtype == 'object': # Format the first (grouping) column as string
+             format_dict[col] = "{}" # Ensure grouping column isn't formatted as number
 
-    try: styled_table = df_copy.style.format(format_dict, na_rep="N/A")
-    except Exception as e: st.error(f"Error applying format to YOY table: {e}"); return df_copy.style
-
-    def color_pos_neg(val):
+    # --- Define Coloring Functions ---
+    def color_pos_neg_standard(val):
+        """Standard coloring: positive is green, negative is red."""
         if isinstance(val, str) and val == "N/A": return 'color: grey'
         numeric_val = pd.to_numeric(val, errors='coerce')
         if pd.isna(numeric_val): return 'color: grey'
         elif numeric_val > 0: return 'color: green'
         elif numeric_val < 0: return 'color: red'
-        else: return 'color: inherit'
+        else: return 'color: inherit' # Or black/grey for zero change
 
+    def color_pos_neg_inverted(val):
+        """Inverted coloring (for ACOS): positive is red, negative is green."""
+        if isinstance(val, str) and val == "N/A": return 'color: grey'
+        numeric_val = pd.to_numeric(val, errors='coerce')
+        if pd.isna(numeric_val): return 'color: grey'
+        elif numeric_val > 0: return 'color: red'   # Positive change (ACOS increase) is red (bad)
+        elif numeric_val < 0: return 'color: green' # Negative change (ACOS decrease) is green (good)
+        else: return 'color: inherit' # Or black/grey for zero change
+
+    # --- Apply Formatting ---
+    try:
+        styled_table = df_copy.style.format(format_dict, na_rep="N/A")
+    except Exception as e:
+        st.error(f"Error applying format to YOY table: {e}")
+        return df_copy.style # Return basic styler on error
+
+    # --- Apply Conditional Coloring ---
     for change_col in highlight_change_cols:
         if change_col in df_copy.columns:
-            try: styled_table = styled_table.apply(lambda x: [color_pos_neg(v) for v in x], subset=[change_col], axis=0)
-            except Exception as e: st.warning(f"Could not apply color style to YOY column '{change_col}': {e}")
+            try:
+                # Choose the appropriate coloring function based on the column name
+                if change_col == "ACOS % Change":
+                    color_func_to_apply = color_pos_neg_inverted
+                else:
+                    color_func_to_apply = color_pos_neg_standard
 
+                # Apply the chosen function element-wise using applymap
+                styled_table = styled_table.applymap(color_func_to_apply, subset=[change_col])
+
+            except Exception as e:
+                st.warning(f"Could not apply color style to YOY column '{change_col}': {e}")
+
+    # --- Apply Alignment ---
     text_align='right'
     try:
+        # Align first column left, others right
         first_col_name = df_copy.columns[0]
+        # Using CSS selectors compatible with newer pandas/streamlit versions
         styles = [
              {'selector': 'th', 'props': [('text-align', text_align), ('white-space', 'nowrap')]},
              {'selector': 'td', 'props': [('text-align', text_align)]},
-             {'selector': f'th[data-col-name="{first_col_name}"]', 'props': [('text-align', 'left')]},
-             {'selector': f'td[data-col-name="{first_col_name}"]', 'props': [('text-align', 'left')]} ]
-        styled_table = styled_table.set_table_styles(styles, overwrite=False)
+             # Target first column header and cells specifically by name/position if possible
+             # This might need adjustment depending on exact HTML structure render
+             {'selector': f'th.col_heading.level0.col0', 'props': [('text-align', 'left')]}, # Target first header
+             {'selector': f'td:first-child', 'props': [('text-align', 'left')]}, # Target first data cell in each row
+             {'selector': f'th[data-col-name="{first_col_name}"]', 'props': [('text-align', 'left !important')]}, # More specific targeting if available
+             {'selector': f'td[data-col-name="{first_col_name}"]', 'props': [('text-align', 'left !important')]}
+             ]
+        # It's often simpler and more reliable to set general alignment and then override the first column
+        styled_table = styled_table.set_properties(**{'text-align': text_align})
+        styled_table = styled_table.set_properties(subset=[first_col_name], **{'text-align': 'left'})
+
     except Exception as e:
         st.warning(f"Could not apply specific alignment to YOY table: {e}. Using general alignment.")
-        styled_table = styled_table.set_properties(**{'text-align': text_align})
+        styled_table = styled_table.set_properties(**{'text-align': text_align}) # Fallback
 
     return styled_table
 
