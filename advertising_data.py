@@ -1272,7 +1272,7 @@ if advertising_file is not None:
     selected_mp_widget = st.sidebar.selectbox(
         "Select Marketplace",
         options=marketplace_options,
-        index=current_mp_index,
+        #index=current_mp_index,
         key="marketplace_selector_value" # Key links widget to session state
     )
     # selected_mp_widget now holds the value selected in this run
