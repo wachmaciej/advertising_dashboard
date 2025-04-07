@@ -24,6 +24,8 @@ st.set_page_config(
 # =============================================================================
 # Common Functions for Advertising Data
 # =============================================================================
+
+@st.cache_data
 def preprocess_ad_data(df):
     """Preprocess advertising data for analysis"""
     if df is None or df.empty:
@@ -90,7 +92,7 @@ def preprocess_ad_data(df):
 
     return df_processed
 
-
+@st.cache_data
 def filter_data_by_timeframe(df, selected_years, selected_timeframe, selected_week):
     """
     Filters data for selected years based on timeframe.
@@ -172,7 +174,7 @@ def filter_data_by_timeframe(df, selected_years, selected_timeframe, selected_we
 # Basic Chart/Table/Insight/Styling Helpers
 # =============================================================================
 
-# <<< Updated create_metric_comparison_chart function >>>
+@st.cache_data
 def create_metric_comparison_chart(df, metric, portfolio_name=None, campaign_type="Sponsored Products"):
     """Creates a bar chart comparing a metric by Portfolio Name. Now calculates CPC if possible."""
     required_cols_base = {"Product", "Portfolio Name"}
@@ -294,6 +296,7 @@ def create_metric_comparison_chart(df, metric, portfolio_name=None, campaign_typ
     return fig
 # <<< End of updated function >>>
 
+@st.cache_data
 def create_performance_metrics_table(df, portfolio_name=None, campaign_type="Sponsored Products"):
     """Creates portfolio breakdown and total summary tables"""
     # THIS FUNCTION IS NO LONGER DIRECTLY USED FOR SP/SB/SD TABS but kept for potential future use / other parts
@@ -374,7 +377,7 @@ def create_performance_metrics_table(df, portfolio_name=None, campaign_type="Spo
     metrics_by_portfolio = metrics_by_portfolio.rename(columns={"Portfolio Name": "Portfolio"})
     return metrics_by_portfolio, total_summary
 
-
+@st.cache_data
 def create_metric_over_time_chart(data, metric, portfolio, product_type, show_yoy=True, weekly_total_sales_data=None): # Added weekly_total_sales_data
     """Create a chart showing metric over time with optional YoY comparison (Weekly YoY Overlay with Month Annotations)."""
     if data is None or data.empty:
@@ -807,10 +810,18 @@ def style_metrics_table(df):
     styled = style_dataframe(df, format_dict, highlight_cols=["ACOS", "ROAS"], color_map_func=[color_acos, color_roas], na_rep="N/A")
     return styled
 
+@st.cache_data
 def generate_insights(total_metrics_series, campaign_type):
     """Generates text insights based on a summary row (Pandas Series)"""
-    acos_threshold = 15 if campaign_type == "Sponsored Brands" else 30
+    # --- Define Your Specific Thresholds Here ---
+    acos_target = 15.0   # Acceptable ACOS is <= 15%
+    roas_target = 5.0    # Good ROAS is >= 5
+    ctr_target = 0.35  # Good CTR is >= 0.35%
+    cvr_target = 10.0   # Good CVR is >= 10%
+    # --- End of Threshold Definitions ---
+
     insights = []
+    # Get the metric values from the input series
     acos = total_metrics_series.get("ACOS", np.nan)
     roas = total_metrics_series.get("ROAS", np.nan)
     ctr = total_metrics_series.get("CTR", np.nan)
@@ -821,36 +832,51 @@ def generate_insights(total_metrics_series, campaign_type):
     if pd.isna(sales): sales = 0
     if pd.isna(spend): spend = 0
 
+    # --- Insight Logic using the defined thresholds ---
     if spend > 0 and sales == 0:
         insights.append("⚠️ **Immediate Attention:** Spend occurred with zero attributed sales. Review targeting, keywords, and product pages urgently.")
-        if pd.notna(ctr): insights.append(f"ℹ️ Click-through rate was {ctr:.2f}%.")
+        if pd.notna(ctr): insights.append(f"ℹ️ Click-through rate was {ctr:.2f}%.") # Use 2 decimal places for CTR display if needed
     else:
+        # ACOS Insight
         if pd.isna(acos):
             if spend == 0 and sales == 0: insights.append("ℹ️ No spend or sales recorded for ACOS calculation.")
             elif sales == 0 and spend > 0: insights.append("ℹ️ ACOS is not applicable (No Sales from Spend).")
-            elif spend == 0 and sales > 0: insights.append("✅ **ACOS:** ACOS is effectively 0% (Sales with no spend).")
+            elif spend == 0 and sales > 0: insights.append(f"✅ **ACOS:** ACOS is effectively 0% (Sales with no spend), which is below the target (≤{acos_target}%).") # Clarified message for 0% ACOS
             elif spend == 0: insights.append("ℹ️ ACOS is not applicable (No Spend).")
-        elif acos > acos_threshold: insights.append(f"📈 **High ACOS:** Overall ACOS ({acos:.1f}%) is above the target ({acos_threshold}%). Consider optimizing bids, keywords, or targeting.")
-        else: insights.append(f"✅ **ACOS:** Overall ACOS ({acos:.1f}%) is within the acceptable range (≤{acos_threshold}%).")
+        elif acos > acos_target: # Compare with acos_target
+            insights.append(f"📈 **High ACOS:** Overall ACOS ({acos:.1f}%) is above the target ({acos_target}%). Consider optimizing bids, keywords, or targeting.")
+        else: # ACOS is <= acos_target
+            insights.append(f"✅ **ACOS:** Overall ACOS ({acos:.1f}%) is within the acceptable range (≤{acos_target}%).")
 
+        # ROAS Insight
         if pd.isna(roas):
             if spend == 0 and sales == 0: insights.append("ℹ️ No spend or sales recorded for ROAS calculation.")
             elif spend == 0 and sales > 0 : insights.append("✅ **ROAS:** ROAS is effectively infinite (Sales with No Spend).")
             elif spend > 0 and sales == 0: insights.append("ℹ️ ROAS is 0 (No Sales from Spend).")
-        elif roas < 3: insights.append(f"📉 **Low ROAS:** Overall ROAS ({roas:.2f}) is below the common target of 3. Review performance and strategy.")
-        else: insights.append(f"✅ **ROAS:** Overall ROAS ({roas:.2f}) is good (≥3).")
+        elif roas < roas_target: # Compare with roas_target
+            insights.append(f"📉 **Low ROAS:** Overall ROAS ({roas:.2f}) is below the target of {roas_target}. Review performance and strategy.")
+        else: # ROAS is >= roas_target
+            insights.append(f"✅ **ROAS:** Overall ROAS ({roas:.2f}) is good (≥{roas_target}).")
 
-        if pd.isna(ctr): insights.append("ℹ️ Click-Through Rate (CTR) could not be calculated (likely no impressions).")
-        elif ctr < 0.3: insights.append(f"📉 **Low CTR:** Click-through rate ({ctr:.2f}%) is low (<0.3%). Review ad creative, relevance, or placement.")
-        else: insights.append(f"✅ **CTR:** Click-through rate ({ctr:.2f}%) is satisfactory (≥0.3%).")
+        # CTR Insight
+        if pd.isna(ctr):
+            insights.append("ℹ️ Click-Through Rate (CTR) could not be calculated (likely no impressions).")
+        elif ctr < ctr_target: # Compare with ctr_target
+            insights.append(f"📉 **Low CTR:** Click-through rate ({ctr:.2f}%) is low (<{ctr_target}%). Review ad creative, relevance, or placement.") # Display CTR with 2 decimals for comparison
+        else: # CTR is >= ctr_target
+            insights.append(f"✅ **CTR:** Click-through rate ({ctr:.2f}%) is satisfactory (≥{ctr_target}%).")
 
-        if pd.isna(cvr): insights.append("ℹ️ Conversion Rate (CVR) could not be calculated (likely no clicks).")
-        elif cvr < 10: insights.append(f"📉 **Low CVR:** Conversion rate ({cvr:.1f}%) is below 10%. Review product listing pages and targeting.")
-        else: insights.append(f"✅ **CVR:** Conversion rate ({cvr:.1f}%) is good (≥10%).")
+        # CVR Insight
+        if pd.isna(cvr):
+            insights.append("ℹ️ Conversion Rate (CVR) could not be calculated (likely no clicks).")
+        elif cvr < cvr_target: # Compare with cvr_target
+            insights.append(f"📉 **Low CVR:** Conversion rate ({cvr:.1f}%) is below the target ({cvr_target}%). Review product listing pages and targeting.")
+        else: # CVR is >= cvr_target
+            insights.append(f"✅ **CVR:** Conversion rate ({cvr:.1f}%) is good (≥{cvr_target}%).")
 
     return insights
 
-
+@st.cache_data
 def create_yoy_grouped_table(df_filtered_period, group_by_col, selected_metrics, years_to_process, display_col_name=None):
     """Creates a merged YoY comparison table grouped by a specific column."""
     if df_filtered_period is None or df_filtered_period.empty: return pd.DataFrame()
@@ -1086,7 +1112,7 @@ def style_yoy_comparison_table(df):
 
     return styled_table
 
-
+@st.cache_data
 def calculate_yoy_summary_row(df, selected_metrics, years_to_process, id_col_name, id_col_value):
     """Calculates a single summary row with YoY comparison based on yearly totals."""
     if df is None or df.empty or not years_to_process: return pd.DataFrame()
@@ -1712,27 +1738,57 @@ if "ad_data_processed" in st.session_state and not st.session_state["ad_data_pro
             st.markdown("---")
             st.subheader("Key Insights (Latest Year in Selected Period)")
 
-            # Initialize portfolio_yoy_summary_tab if it wasn't created due to filters/data issues
-            if 'portfolio_yoy_summary_tab' not in locals():
-                 portfolio_yoy_summary_tab = pd.DataFrame()
-            if 'years_in_tab_data' not in locals():
-                 years_in_tab_data = []
-
-            if not portfolio_yoy_summary_tab.empty and years_in_tab_data:
+            # Ensure date-filtered data for the tab exists and the list of years is available
+            if 'ad_data_tab_date_filtered' in locals() and not ad_data_tab_date_filtered.empty and 'years_in_tab_data' in locals() and years_in_tab_data:
                 latest_year_tab = years_in_tab_data[-1]
-                summary_latest_year_data = {}
-                for metric in selected_yoy_metrics_tab: # Use metrics selected for the table
-                    col_name = f"{metric} {latest_year_tab}"
-                    if col_name in portfolio_yoy_summary_tab.columns:
-                        summary_latest_year_data[metric] = portfolio_yoy_summary_tab.iloc[0][col_name]
-                    else: summary_latest_year_data[metric] = np.nan
+                # Filter the date-filtered data to get only the latest year's data
+                data_latest_year = ad_data_tab_date_filtered[ad_data_tab_date_filtered['Year'] == latest_year_tab].copy()
 
-                if summary_latest_year_data:
-                    summary_series_for_insights = pd.Series(summary_latest_year_data)
+                if not data_latest_year.empty:
+                    # Calculate totals for core metrics needed for insights directly from latest year data
+                    # Use .get(col, 0) or similar if columns might be missing, or ensure they exist
+                    # Convert to numeric, coercing errors and filling NaN with 0 before summing
+                    total_spend = pd.to_numeric(data_latest_year.get("Spend"), errors='coerce').fillna(0).sum()
+                    total_sales = pd.to_numeric(data_latest_year.get("Sales"), errors='coerce').fillna(0).sum()
+                    total_clicks = pd.to_numeric(data_latest_year.get("Clicks"), errors='coerce').fillna(0).sum()
+                    total_impressions = pd.to_numeric(data_latest_year.get("Impressions"), errors='coerce').fillna(0).sum()
+                    total_orders = pd.to_numeric(data_latest_year.get("Orders"), errors='coerce').fillna(0).sum()
+
+                    # Calculate derived metrics specifically for insights
+                    insight_acos = (total_spend / total_sales * 100) if total_sales > 0 else np.nan
+                    insight_roas = (total_sales / total_spend) if total_spend > 0 else np.nan
+                    # Use 0 for CTR/CVR if denominator is 0, or np.nan if you prefer insights function to handle NaN
+                    insight_ctr = (total_clicks / total_impressions * 100) if total_impressions > 0 else 0
+                    insight_cvr = (total_orders / total_clicks * 100) if total_clicks > 0 else 0
+
+                    # Handle potential inf values from division by zero if ROAS/ACOS were calculated differently
+                    insight_acos = np.nan if insight_acos in [np.inf, -np.inf] else insight_acos
+                    insight_roas = np.nan if insight_roas in [np.inf, -np.inf] else insight_roas
+
+
+                    # Prepare data Series for the generate_insights function
+                    # Ensure it contains the keys the function expects ('ACOS', 'ROAS', 'CTR', 'CVR', 'Sales', 'Spend')
+                    summary_series_for_insights = pd.Series({
+                        "ACOS": insight_acos,
+                        "ROAS": insight_roas,
+                        "CTR": insight_ctr,
+                        "CVR": insight_cvr,
+                        "Sales": total_sales, # Pass base values too, generate_insights uses them
+                        "Spend": total_spend
+                    })
+
+                    # Generate and display insights using the independently calculated data
                     insights_tab = generate_insights(summary_series_for_insights, product_type_tab)
-                    for insight in insights_tab: st.markdown(f"- {insight}")
-                else: st.info("No data found for the latest year in the summary to generate insights.")
-            else: st.info("No summary data available to generate insights.")
+                    for insight in insights_tab:
+                        st.markdown(f"- {insight}")
+
+                else:
+                    # Handle case where there's no data for the very latest year within the filter
+                    st.info(f"No data found for the latest year ({latest_year_tab}) in the selected period to generate insights.")
+            else:
+                # Handle case where date filtering resulted in empty data overall for the tab
+                st.info("No summary data available to generate insights (check date range and filters).")
+            # --- End of revised Insights Section ---
 
 
 # =============================================================================
